@@ -1,0 +1,50 @@
+# ==========================================
+# 🧠 PromptGrapher Core GitIgnore Safeguards
+# ==========================================
+
+# 1. Credentials & Local Environments Safeguards (CRITICAL)
+# Never track API keys, base URLs, or local provider parameters
+.env
+.env.local
+.env.*.local
+
+# 2. Python Virtual Environment Isolated Layers
+# Prevents thousands of third-party package dependencies tracking
+venv/
+ENV/
+env/
+.venv/
+
+# 3. Dynamic Python Compilation Caches & Runtime Artifacts
+# Stops byte-code execution tracking data
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 4. Global Package Distribution Build Output Artifacts
+# Eliminates local distribution and whl binaries caching
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 5. OS Specific System Traces & IDE Cache Directories
+# Cleans project layouts across different developer stations
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
