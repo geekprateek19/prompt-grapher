@@ -48,3 +48,6 @@ MANIFEST
 .idea/
 .DS_Store
 Thumbs.db
+graphify-out/
+.coverage
+htmlcov/

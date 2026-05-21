@@ -1,75 +1,258 @@
-import click
-import os
+from __future__ import annotations
+
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+from dotenv import load_dotenv
+
 from core.parser import GraphifyHeuristicParser
 from core.synthesizer import PromptSynthesizer
 
-@click.group()
-def main():
-    """
-    🚀 PromptGrapher: Global Context-Aware AI Rules Generator.
-    Extracts codebase structural DNA via Graphify and dynamically builds .cursorrules.
-    """
-    pass
+DEFAULT_GRAPHIFY_ARGS = ("--no-cluster",)
+SUPPORTED_GRAPH_FILES = ("graph.json", "manifest.json")
+DEFAULT_CURSOR_RULES_FILE = ".cursor/rules/project-rules.mdc"
+DEFAULT_AGENTS_FILE = "AGENTS.md"
+GRAPHIFY_BACKEND_API_ENV = {
+    "claude": "ANTHROPIC_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
 
-@main.command()
-def init():
-    """Initializes global environment configuration parameters for the AI engine."""
-    env_content = """# PromptGrapher AI Engine Configurations
-AI_BASE_URL="https://api.groq.com/openai/v1"
-AI_API_KEY="ENTER_YOUR_GROQ_API_KEY_HERE"
-AI_MODEL_NAME="llama-3.3-70b-versatile"
+
+def _env_template() -> str:
+    return """# PromptGrapher runtime configuration
+# Leave AI_BASE_URL blank to use the default OpenAI endpoint.
+AI_BASE_URL=
+
+# Required. PromptGrapher also falls back to OPENAI_API_KEY, GROQ_API_KEY,
+# and OPENROUTER_API_KEY if AI_API_KEY is not set.
+AI_API_KEY=
+
+# Required. Examples: gpt-4.1-mini, llama-3.3-70b-versatile, mistral-large-latest
+AI_MODEL_NAME=
 """
-    if not os.path.exists(".env"):
-        with open(".env", "w") as f:
-            f.write(env_content)
-        click.echo(click.style("✨ Template .env file successfully created! Please update your API credentials inside it.", fg="green", bold=True))
+
+
+def _locate_graph_artifact(project_path: Path) -> Path | None:
+    graphify_dir = project_path / "graphify-out"
+    for filename in SUPPORTED_GRAPH_FILES:
+        candidate = graphify_dir / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _default_graphify_command() -> list[str]:
+    return [sys.executable, "-m", "graphify"]
+
+
+def _run_graphify(
+    project_path: Path,
+    graphify_bin: str | None,
+    graphify_args: tuple[str, ...],
+    graphify_strategy: str,
+    graphify_backend: str | None,
+    graphify_model: str | None,
+    api_key: str | None,
+) -> None:
+    if graphify_strategy == "semantic":
+        command = ([graphify_bin] if graphify_bin else _default_graphify_command()) + [
+            "extract",
+            str(project_path),
+        ]
+        if graphify_backend:
+            command.extend(["--backend", graphify_backend])
+        if graphify_model:
+            command.extend(["--model", graphify_model])
+        command.extend(graphify_args)
     else:
-        click.echo(click.style("⚠️ Configuration file .env already exists in this root directory.", fg="yellow"))
+        command = ([graphify_bin] if graphify_bin else _default_graphify_command()) + [
+            "update",
+            str(project_path),
+            *graphify_args,
+        ]
+
+    env = os.environ.copy()
+    backend_api_env = GRAPHIFY_BACKEND_API_ENV.get(graphify_backend or "")
+    if backend_api_env and api_key and backend_api_env not in env:
+        env[backend_api_env] = api_key
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False, env=env)
+    if result.returncode != 0:
+        details = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part) or "No output."
+        raise click.ClickException(f"Graphify failed with exit code {result.returncode}: {details}")
+
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+def main() -> None:
+    """Generate repository-aware AI rules from Graphify dependency graphs."""
+
 
 @main.command()
-@click.argument('path', default='.')
-@click.option('--model', default=None, help='Target LLM model override (defaults to .env value)')
-def analyze(path, model):
-    """Parses Graphify manifest and drops .cursorrules directly into target folder."""
-    click.echo(click.style("\n🚀 [PromptGrapher] Starting codebase architectural analysis...", fg="cyan", bold=True))
-    
-    # Target path aur manifest route verify karna
-    project_path = os.path.abspath(path)
-    manifest_path = os.path.join(project_path, "graphify-out", "manifest.json")
-    
-    if not os.path.exists(manifest_path):
-        click.echo(click.style(f"❌ Error: Graphify output missing at '{manifest_path}'", fg="red", bold=True))
-        click.echo(click.style("👉 Tip: Run 'graphify extract <path>' first inside this directory.", fg="yellow"))
-        return
+@click.option("--force", is_flag=True, help="Overwrite an existing .env file.")
+def init(force: bool) -> None:
+    """Create a local .env template for the AI provider configuration."""
+    env_path = Path(".env")
 
-    try:
-        # Phase 1: AST Metadata Extraction
-        click.echo("[*] Parsing Graphify structural dependencies...")
-        parser = GraphifyHeuristicParser(manifest_path)
-        dna_metrics = parser.compile_heuristics_payload()
-        
-        click.echo(click.style("📊 Architectural metrics successfully extracted:", fg="green"))
+    if env_path.exists() and not force:
+        raise click.ClickException("A .env file already exists. Re-run with --force to overwrite it.")
+
+    env_path.write_text(_env_template(), encoding="utf-8")
+    click.echo("Created .env template. Fill in AI_API_KEY and AI_MODEL_NAME before running analyze.")
+
+
+@main.command()
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option(
+    "--graph-input",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to a Graphify JSON artifact. If omitted, PromptGrapher looks in <path>/graphify-out/.",
+)
+@click.option(
+    "--bootstrap-graph/--no-bootstrap-graph",
+    default=True,
+    show_default=True,
+    help="Run Graphify automatically when no graph artifact exists yet.",
+)
+@click.option(
+    "--refresh-graph/--reuse-graph",
+    default=True,
+    show_default=True,
+    help="Refresh the Graphify artifact before generating rules. Disable to reuse an existing graphify-out artifact as-is.",
+)
+@click.option(
+    "--graphify-strategy",
+    type=click.Choice(["code-only", "semantic"], case_sensitive=False),
+    default="code-only",
+    show_default=True,
+    help="Graph bootstrap mode. 'code-only' uses Graphify update with no LLM. 'semantic' uses Graphify extract.",
+)
+@click.option(
+    "--graphify-bin",
+    default=None,
+    help="Optional Graphify executable override. By default PromptGrapher uses the same Python environment via 'python -m graphify'.",
+)
+@click.option(
+    "--graphify-arg",
+    "graphify_args",
+    multiple=True,
+    help="Additional argument to pass to Graphify. Repeat the option for multiple arguments.",
+)
+@click.option(
+    "--graphify-backend",
+    default=None,
+    help="Graphify backend for auto-bootstrap, for example: openai, gemini, claude, deepseek, kimi, ollama.",
+)
+@click.option(
+    "--graphify-model",
+    default=None,
+    help="Model override for Graphify auto-bootstrap.",
+)
+@click.option("--model", default=None, help="Override AI_MODEL_NAME for this run.")
+@click.option("--base-url", default=None, help="Override AI_BASE_URL for this run.")
+@click.option("--api-key", default=None, help="Override AI_API_KEY for this run.")
+@click.option(
+    "--output-file",
+    default=DEFAULT_CURSOR_RULES_FILE,
+    show_default=True,
+    help="Path for the generated Cursor project rules file, written into the target project directory by default.",
+)
+@click.option(
+    "--agents-file",
+    default=DEFAULT_AGENTS_FILE,
+    show_default=True,
+    help="Path for the generated AGENTS.md backup/source-of-truth file, written into the target project directory by default.",
+)
+@click.option(
+    "--legacy-cursorrules-file",
+    default=None,
+    help="Optional legacy .cursorrules output path for older workflows.",
+)
+@click.option(
+    "--quiet-metrics/--show-metrics",
+    default=False,
+    show_default=True,
+    help="Suppress the parsed architecture summary in the terminal output.",
+)
+def analyze(
+    path: Path,
+    graph_input: Path | None,
+    bootstrap_graph: bool,
+    refresh_graph: bool,
+    graphify_strategy: str,
+    graphify_bin: str | None,
+    graphify_args: tuple[str, ...],
+    graphify_backend: str | None,
+    graphify_model: str | None,
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
+    output_file: str,
+    agents_file: str,
+    legacy_cursorrules_file: str | None,
+    quiet_metrics: bool,
+) -> None:
+    """Analyze a project and generate repository-specific Cursor and agent rules."""
+    load_dotenv()
+    project_path = path.resolve()
+    click.echo(f"[PromptGrapher] Analyzing {project_path}")
+
+    graph_path = graph_input.resolve() if graph_input else _locate_graph_artifact(project_path)
+    should_run_graphify = False
+    if graph_input is None and bootstrap_graph:
+        if graph_path is None:
+            click.echo("[PromptGrapher] No graph artifact found. Running Graphify first...")
+            should_run_graphify = True
+        elif refresh_graph:
+            click.echo("[PromptGrapher] Refreshing Graphify artifact before regenerating rules...")
+            should_run_graphify = True
+
+    if should_run_graphify:
+        strategy = graphify_strategy.lower()
+        extra_graphify_args = graphify_args or DEFAULT_GRAPHIFY_ARGS
+        _run_graphify(
+            project_path,
+            graphify_bin,
+            extra_graphify_args,
+            strategy,
+            graphify_backend,
+            graphify_model,
+            api_key or os.environ.get("AI_API_KEY"),
+        )
+        graph_path = _locate_graph_artifact(project_path)
+
+    if graph_path is None:
+        expected = ", ".join(f"graphify-out/{name}" for name in SUPPORTED_GRAPH_FILES)
+        raise click.ClickException(
+            "No Graphify artifact was found. "
+            f"Expected one of {expected}, or provide --graph-input explicitly."
+        )
+
+    parser = GraphifyHeuristicParser(project_path=project_path, graph_path=graph_path)
+    dna_metrics = parser.compile_heuristics_payload()
+
+    if not quiet_metrics:
+        click.echo("[PromptGrapher] Heuristic summary:")
         click.echo(json.dumps(dna_metrics, indent=2))
-        
-        # Phase 2: Orchestrate Enterprise LLM Prompt Synthesis
-        click.echo("\n[*] Contacting AI Cognitive Synthesis Engine...")
-        synthesizer = PromptSynthesizer()
-        
-        # Runtime parameters dynamic model override condition
-        if model:
-            synthesizer.model_name = model
-            
-        generated_rules_path = synthesizer.generate_rules(dna_metrics, output_path=project_path)
-        
-        click.echo(click.style(f"\n🎉 [Success] Architectural lockdown complete!", fg="green", bold=True))
-        click.echo(click.style(f"🎯 Rulebook successfully activated at: {generated_rules_path}\n", fg="yellow"))
-        
-    except ValueError as ve:
-        click.echo(click.style(f"❌ Configuration Error: {ve}", fg="red", bold=True))
-        click.echo(click.style("👉 Please verify your local '.env' file parameters.", fg="yellow"))
-    except Exception as e:
-        click.echo(click.style(f"💥 Pipeline Execution Halted: {e}", fg="red", bold=True))
 
-if __name__ == '__main__':
+    synthesizer = PromptSynthesizer(base_url=base_url, api_key=api_key, model_name=model)
+    generated_files = synthesizer.generate_rule_files(
+        dna_metrics,
+        output_path=project_path,
+        cursor_rules_filename=output_file,
+        agents_filename=agents_file,
+        legacy_cursorrules_filename=legacy_cursorrules_file,
+    )
+
+    for label, file_path in generated_files.items():
+        click.echo(f"[PromptGrapher] {label} generated at {file_path}")
+
+
+if __name__ == "__main__":
     main()

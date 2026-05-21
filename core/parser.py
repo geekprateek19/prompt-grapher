@@ -1,118 +1,440 @@
+from __future__ import annotations
+
 import json
-import os
+import re
 from collections import Counter
+from pathlib import Path
+
 import networkx as nx
 
+EXTENSION_LANGUAGE_MAP = {
+    ".cs": "C#",
+    ".css": "CSS",
+    ".go": "Go",
+    ".java": "Java",
+    ".js": "JavaScript",
+    ".jsx": "React JSX",
+    ".kt": "Kotlin",
+    ".php": "PHP",
+    ".py": "Python",
+    ".rb": "Ruby",
+    ".rs": "Rust",
+    ".scala": "Scala",
+    ".sql": "SQL",
+    ".swift": "Swift",
+    ".ts": "TypeScript",
+    ".tsx": "React TSX",
+}
+
+FRAMEWORK_SIGNATURES = {
+    "Django": ("django", "urls.py", "views.py", "manage.py"),
+    "FastAPI": ("fastapi", "apirouter", "asgi.py"),
+    "Flask": ("flask", "blueprint"),
+    "React": ("react", "component", "tsx", "jsx", "hook"),
+    "Next.js": ("next.config", "app/", "pages/", "layout.tsx"),
+    "Vue": ("vue", "pinia", "nuxt"),
+    "Angular": ("angular", "component.ts", "service.ts", "module.ts"),
+    "Express": ("express", "router", "middleware"),
+    "NestJS": ("nestjs", "controller.ts", "service.ts", "module.ts"),
+    "Spring": ("spring", "controller", "service", "repository"),
+    "Rails": ("app/models", "app/controllers", "active_record"),
+    "Laravel": ("artisan", "eloquent", "controller.php", "middleware"),
+}
+
+TEST_FRAMEWORK_SIGNATURES = {
+    "Pytest": ("pytest.ini", "conftest.py"),
+    "unittest": ("unittest",),
+    "Jest": ("jest.config", "jest.setup", "jest.", "__tests__"),
+    "Vitest": ("vitest.config", "vitest.setup", "vitest."),
+    "Mocha": (".mocharc", "mocha.opts"),
+    "Cypress": ("cypress/", "cypress.config"),
+    "Playwright": ("playwright.config", "@playwright"),
+    "JUnit": ("junit", "surefire"),
+    "RSpec": ("rspec", ".rspec", "spec/"),
+    "xUnit": ("xunit",),
+    "NUnit": ("nunit",),
+}
+
+ENTRYPOINT_PATTERNS = {
+    "main.py",
+    "app.py",
+    "manage.py",
+    "server.py",
+    "server.js",
+    "main.ts",
+    "main.go",
+    "Program.cs",
+    "package.json",
+    "setup.py",
+    "pyproject.toml",
+}
+
+
 class GraphifyHeuristicParser:
-    def __init__(self, manifest_path):
-        self.manifest_path = manifest_path
-        self.nodes = []
+    def __init__(self, project_path: str | Path, graph_path: str | Path | None = None):
+        self.project_path = Path(project_path).resolve()
+        self.graph_path = Path(graph_path).resolve() if graph_path else None
+        self.nodes: list[dict] = []
+        self.edges: list[dict] = []
+        self.graph = nx.DiGraph()
+
+    def resolve_graph_path(self) -> Path:
+        if self.graph_path and self.graph_path.exists():
+            return self.graph_path
+
+        graphify_dir = self.project_path / "graphify-out"
+        for filename in ("graph.json", "manifest.json"):
+            candidate = graphify_dir / filename
+            if candidate.exists():
+                self.graph_path = candidate
+                return candidate
+
+        raise FileNotFoundError(
+            f"Graphify artifact not found under '{graphify_dir}'. "
+            "Expected graph.json or manifest.json."
+        )
+
+    def load_graph(self) -> None:
+        graph_path = self.resolve_graph_path()
+        with graph_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+
+        nodes = data.get("nodes", [])
+        raw_edges = data.get("edges") or data.get("links") or []
+        if not isinstance(nodes, list) or not isinstance(raw_edges, list):
+            raise ValueError(f"Unsupported Graphify schema in '{graph_path}'.")
+
+        self.nodes = [node for node in nodes if isinstance(node, dict)]
         self.edges = []
         self.graph = nx.DiGraph()
-        
-    def load_manifest(self):
-        """Graphify output directory se json fetch karke metadata state build karta hai."""
-        if not os.path.exists(self.manifest_path):
-            raise FileNotFoundError(f"Graphify manifest not found at: {self.manifest_path}")
-            
-        with open(self.manifest_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            # Graphify standard keys matching
-            self.nodes = data.get("nodes", [])
-            self.edges = data.get("edges", [])
-            
-        # NetworkX Direct Graph initialize karna dependency metrics ke liye
-        for node in self.nodes:
-            self.graph.add_node(node.get("id"), type=node.get("type", "unknown"))
-        for edge in self.edges:
-            self.graph.add_edge(edge.get("source"), edge.get("target"), relation=edge.get("type"))
 
-    def detect_architecture_pattern(self):
-        """Graph parameters aur patterns ke baseline distribution se architecture matrix design karta hai."""
-        node_ids = [str(node.get("id")).lower() for node in self.nodes]
-        
-        # Suffix matching heuristics
-        controller_count = sum(1 for nid in node_ids if "controller" in nid)
-        service_count = sum(1 for nid in node_ids if "service" in nid)
-        repo_count = sum(1 for nid in node_ids if "repository" in nid or "repo" in nid)
-        helper_count = sum(1 for nid in node_ids if "helper" in nid or "util" in nid)
-        
-        if controller_count > 0 and service_count > 0:
-            return f"Layered Architecture (MVC / Clean Architecture Pattern) - Detected {controller_count} Controllers, {service_count} Services."
-        elif service_count > 5 and repo_count == 0:
-            return "Domain-Driven Flat Architecture (Services Heavy without decoupled Repository persistence)."
-        elif helper_count > len(self.nodes) * 0.3:
-            return "Utility/Helper Heavy Monolithic structure - High structural coupling detected."
-        else:
-            return "Flat/Standard Monolithic Layout or Custom Object-Oriented Pattern."
-
-    def extract_naming_conventions(self):
-        """Methods aur classes ke naming heuristics calculate karta hai."""
-        method_names = []
-        class_names = []
-        async_count = 0
-        
         for node in self.nodes:
-            node_id = str(node.get("id", ""))
-            node_type = node.get("type", "").lower()
-            
-            if node_type == "class":
-                class_names.append(node_id)
-            elif node_type == "method":
-                method_names.append(node_id)
-                if node_id.endswith("Async"):
-                    async_count += 1
-                    
-        # Basic character checking logic
-        is_pascal_case = any(name[0].isupper() for name in class_names if name) if class_names else True
-        
-        heuristics = {
-            "class_naming": "PascalCase (Preferred)" if is_pascal_case else "camelCase/Mixed",
-            "async_pattern": "Strict Async Suffix Enforced" if async_count > len(method_names) * 0.4 else "Inconsistent Async Naming Patterns",
-            "total_methods_scanned": len(method_names)
+            node_id = self._node_id(node)
+            if not node_id:
+                continue
+            self.graph.add_node(node_id, **node)
+
+        for raw_edge in raw_edges:
+            if not isinstance(raw_edge, dict):
+                continue
+
+            edge = self._normalize_edge(raw_edge)
+            if edge is None:
+                continue
+
+            self.edges.append(edge)
+            self.graph.add_edge(
+                edge["source"],
+                edge["target"],
+                relation=edge["type"],
+            )
+
+    def _normalize_edge(self, edge: dict) -> dict | None:
+        source = edge.get("source") or edge.get("from")
+        target = edge.get("target") or edge.get("to")
+        if source is None or target is None:
+            return None
+
+        return {
+            "source": str(source),
+            "target": str(target),
+            "type": str(edge.get("type") or edge.get("relation") or edge.get("label") or "unknown"),
         }
-        return heuristics
 
-    def identify_structural_hotspots(self):
-        """NetworkX implementation using structural degree weight matrix to detect God Classes."""
-        if len(self.nodes) == 0:
+    def _node_id(self, node: dict) -> str:
+        for key in ("id", "name", "label"):
+            value = node.get(key)
+            if value is not None:
+                return str(value)
+        return ""
+
+    def _node_type(self, node: dict) -> str:
+        node_type = node.get("type") or node.get("kind") or node.get("category") or "unknown"
+        return str(node_type).lower()
+
+    def _node_path(self, node: dict) -> str:
+        containers = [node]
+        for nested_key in ("metadata", "attributes", "data"):
+            nested_value = node.get(nested_key)
+            if isinstance(nested_value, dict):
+                containers.append(nested_value)
+
+        for container in containers:
+            for key in ("path", "file", "filepath", "file_path", "location", "source_file"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+
+        node_id = self._node_id(node)
+        if "/" in node_id or "\\" in node_id or Path(node_id).suffix:
+            return node_id
+        return ""
+
+    def _identifier_from_node(self, node: dict) -> str:
+        node_path = self._node_path(node)
+        if node_path:
+            return Path(node_path).stem
+        node_id = self._node_id(node)
+        return Path(node_id).stem if Path(node_id).suffix else node_id
+
+    def detect_architecture_pattern(self) -> dict:
+        corpus = " ".join(
+            {
+                self._node_id(node).lower()
+                for node in self.nodes
+                if self._node_id(node)
+            }
+            | {
+                self._node_path(node).lower()
+                for node in self.nodes
+                if self._node_path(node)
+            }
+        )
+
+        signals = {
+            "controllers": corpus.count("controller"),
+            "services": corpus.count("service"),
+            "repositories": corpus.count("repository") + corpus.count("/repo"),
+            "components": corpus.count("component"),
+            "pages": corpus.count("/pages/") + corpus.count("/app/"),
+            "hooks": corpus.count("hook"),
+            "domain": corpus.count("domain"),
+            "use_cases": corpus.count("usecase") + corpus.count("use_case"),
+            "adapters": corpus.count("adapter"),
+            "utilities": corpus.count("util") + corpus.count("helper"),
+        }
+
+        if signals["controllers"] and signals["services"] and signals["repositories"]:
+            label = "Layered service / repository architecture"
+        elif signals["domain"] and signals["use_cases"] and signals["adapters"]:
+            label = "Clean architecture / hexagonal architecture"
+        elif signals["components"] and (signals["pages"] or signals["hooks"]):
+            label = "Component-oriented frontend architecture"
+        elif signals["utilities"] > max(3, len(self.nodes) // 5):
+            label = "Utility-heavy monolith"
+        else:
+            label = "Custom or mixed modular architecture"
+
+        return {"label": label, "signals": signals}
+
+    def extract_naming_conventions(self) -> dict:
+        identifiers_by_type = {
+            "classes": [],
+            "functions": [],
+            "files": [],
+        }
+
+        for node in self.nodes:
+            node_type = self._node_type(node)
+            identifier = self._identifier_from_node(node)
+            if not identifier:
+                continue
+
+            if "class" in node_type:
+                identifiers_by_type["classes"].append(identifier)
+            elif "function" in node_type or "method" in node_type:
+                identifiers_by_type["functions"].append(identifier)
+
+            node_path = self._node_path(node)
+            if node_path:
+                identifiers_by_type["files"].append(Path(node_path).stem)
+
+        summary = {}
+        for group, identifiers in identifiers_by_type.items():
+            summary[group] = self._dominant_case(identifiers)
+
+        return {
+            "classes": summary["classes"],
+            "functions": summary["functions"],
+            "files": summary["files"],
+            "summary": (
+                f"Classes: {summary['classes']}; "
+                f"Functions: {summary['functions']}; "
+                f"Files: {summary['files']}"
+            ),
+        }
+
+    def _dominant_case(self, identifiers: list[str]) -> str:
+        cases = [self._classify_identifier(identifier) for identifier in identifiers if identifier]
+        if not cases:
+            return "Unknown"
+        return Counter(cases).most_common(1)[0][0]
+
+    def _classify_identifier(self, identifier: str) -> str:
+        if re.fullmatch(r"[A-Z][A-Za-z0-9]*", identifier):
+            return "PascalCase"
+        if re.fullmatch(r"[a-z]+(?:[A-Z][A-Za-z0-9]*)+", identifier):
+            return "camelCase"
+        if re.fullmatch(r"[a-z0-9]+(?:_[a-z0-9]+)+", identifier):
+            return "snake_case"
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)+", identifier):
+            return "kebab-case"
+        if re.fullmatch(r"[A-Z0-9]+(?:_[A-Z0-9]+)+", identifier):
+            return "UPPER_SNAKE_CASE"
+        return "Mixed"
+
+    def infer_languages(self) -> list[str]:
+        counts: Counter[str] = Counter()
+        for node in self.nodes:
+            language = self._language_from_node(node)
+            if language:
+                counts[language] += 1
+
+        return [language for language, _ in counts.most_common(3)] or ["Unknown"]
+
+    def _language_from_node(self, node: dict) -> str | None:
+        containers = [node]
+        for nested_key in ("metadata", "attributes", "data"):
+            nested_value = node.get(nested_key)
+            if isinstance(nested_value, dict):
+                containers.append(nested_value)
+
+        for container in containers:
+            for key in ("language", "lang"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+        node_path = self._node_path(node)
+        if not node_path:
+            return None
+
+        return EXTENSION_LANGUAGE_MAP.get(Path(node_path).suffix.lower())
+
+    def infer_framework_hints(self) -> list[str]:
+        corpus = " ".join(
+            [
+                self._node_id(node).lower()
+                for node in self.nodes
+                if self._node_id(node)
+            ]
+            + [
+                self._node_path(node).lower()
+                for node in self.nodes
+                if self._node_path(node)
+            ]
+        )
+
+        hints = [
+            framework
+            for framework, markers in FRAMEWORK_SIGNATURES.items()
+            if any(marker in corpus for marker in markers)
+        ]
+        return hints[:5]
+
+    def infer_test_framework_hints(self) -> list[str]:
+        corpus = " ".join(
+            [
+                self._node_id(node).lower()
+                for node in self.nodes
+                if self._node_id(node)
+            ]
+            + [
+                self._node_path(node).lower()
+                for node in self.nodes
+                if self._node_path(node)
+            ]
+        )
+
+        hints = [
+            framework
+            for framework, markers in TEST_FRAMEWORK_SIGNATURES.items()
+            if any(marker in corpus for marker in markers)
+        ]
+        return hints[:5]
+
+    def identify_structural_hotspots(self) -> list[dict]:
+        if not self.graph.nodes:
             return []
-            
-        # In-degree: Kaun si files sabse zyada inject ya reference ho rahi hain (Core Models/Utilities)
-        # Out-degree: Kaun si files sabse zyada external systems call kar rahi hain (Orchestrators/God Classes)
-        out_degrees = dict(self.graph.out_degree())
-        
-        # Sort files by highest outbound dependencies
-        sorted_hotspots = sorted(out_degrees.items(), key=lambda x: x[1], reverse=True)
-        
-        # Filter classes that control too many components (Threshold > 4 connections)
-        god_nodes = [node for node, score in sorted_hotspots if score > 4][:3]
-        return god_nodes
 
-    def compile_heuristics_payload(self):
-        """Saare heuristics pipeline matrices ko single context packet mein bundle karta hai."""
-        self.load_manifest()
-        
+        ranked_nodes = sorted(self.graph.degree(), key=lambda item: item[1], reverse=True)
+        hotspots = []
+        for node_id, degree in ranked_nodes[:5]:
+            hotspots.append(
+                {
+                    "id": str(node_id),
+                    "degree": int(degree),
+                    "type": self._node_type(self.graph.nodes[node_id]),
+                }
+            )
+        return hotspots
+
+    def list_entrypoints(self) -> list[str]:
+        entrypoints = []
+        for node in self.nodes:
+            node_path = self._node_path(node)
+            if not node_path:
+                continue
+
+            normalized_path = node_path.replace("\\", "/")
+            name = Path(normalized_path).name
+            if name in ENTRYPOINT_PATTERNS:
+                entrypoints.append(normalized_path)
+
+        return sorted(set(entrypoints))[:10]
+
+    def detect_test_presence(self) -> dict:
+        tests = []
+        for node in self.nodes:
+            node_path = self._node_path(node)
+            if not node_path:
+                continue
+
+            lowered = node_path.lower().replace("\\", "/")
+            filename = Path(lowered).name
+            if (
+                "/tests/" in lowered
+                or "/__tests__/" in lowered
+                or "/spec/" in lowered
+                or filename.startswith("test_")
+                or ".test." in filename
+                or ".spec." in filename
+            ):
+                tests.append(node_path)
+
+        return {
+            "has_tests": bool(tests),
+            "sample_test_files": sorted(set(tests))[:10],
+        }
+
+    def top_node_types(self) -> list[dict]:
+        counts = Counter(self._node_type(node) for node in self.nodes if self._node_type(node))
+        return [{"type": node_type, "count": count} for node_type, count in counts.most_common(8)]
+
+    def compile_heuristics_payload(self) -> dict:
+        self.load_graph()
+
         architecture = self.detect_architecture_pattern()
         naming = self.extract_naming_conventions()
-        god_classes = self.identify_structural_hotspots()
-        
+        hotspots = self.identify_structural_hotspots()
+        tests = self.detect_test_presence()
+        languages = self.infer_languages()
+        frameworks = self.infer_framework_hints()
+        test_frameworks = self.infer_test_framework_hints()
+
         payload = {
+            "graph_source": str(self.resolve_graph_path()),
             "metrics": {
-                "total_files_analyzed": len(self.nodes),
-                "total_dependency_edges": len(self.edges)
+                "total_nodes": len(self.nodes),
+                "total_edges": len(self.edges),
+                "total_graph_nodes": self.graph.number_of_nodes(),
+                "total_graph_edges": self.graph.number_of_edges(),
             },
-            "architecture_type": architecture,
-            "naming_pattern": f"Classes: {naming['class_naming']} | Methods: {naming['async_pattern']}",
-            "god_classes": god_classes if god_classes else "None (Codebase architecture is highly decoupled and modular)"
+            "project_profile": {
+                "primary_languages": languages,
+                "framework_hints": frameworks,
+                "test_framework_hints": test_frameworks,
+                "architecture_type": architecture["label"],
+                "architecture_signals": architecture["signals"],
+                "entrypoints": self.list_entrypoints(),
+                "has_tests": tests["has_tests"],
+                "sample_test_files": tests["sample_test_files"],
+            },
+            "naming_patterns": naming,
+            "hotspots": hotspots,
+            "top_node_types": self.top_node_types(),
+            "architecture_type": architecture["label"],
+            "naming_pattern": naming["summary"],
+            "god_classes": [hotspot["id"] for hotspot in hotspots],
         }
         return payload
-
-# Local CLI Testing Gateway
-if __name__ == "__main__":
-    # Assuming execution from project directory pointing to a test graphify output
-    test_path = "./graphify-out/manifest.json"
-    if os.path.exists(test_path):
-        parser = GraphifyHeuristicParser(test_path)
-        analysis_result = parser.compile_heuristics_payload()
-        print(json.dumps(analysis_result, indent=2))

@@ -1,0 +1,5 @@
+click>=8.1.7
+graphifyy>=0.8.14
+networkx>=3.2
+openai>=1.30.0
+python-dotenv>=1.0.1
