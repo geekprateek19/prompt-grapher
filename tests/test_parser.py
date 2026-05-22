@@ -28,6 +28,13 @@ def test_parser_supports_manifest_json(tmp_path: Path) -> None:
     assert payload["project_profile"]["primary_languages"] == ["Python"]
     assert payload["project_profile"]["architecture_type"] == "Layered service / repository architecture"
     assert payload["project_profile"]["has_tests"] is True
+    assert payload["repository_shape"]["source_roots"] == ["src"]
+    assert payload["repository_shape"]["test_roots"] == ["tests"]
+    assert payload["repository_shape"]["dominant_file_roles"][:3] == ["controller", "service", "repository"]
+    assert payload["dependency_flows"] == [
+        {"from": "controller", "to": "service", "count": 1},
+        {"from": "service", "to": "repository", "count": 1},
+    ]
     assert payload["graph_source"].endswith("manifest.json")
 
 
@@ -53,6 +60,12 @@ def test_parser_supports_graph_json_links_schema(tmp_path: Path) -> None:
 
     assert payload["project_profile"]["primary_languages"] == ["React TSX", "TypeScript"]
     assert payload["project_profile"]["architecture_type"] == "Component-oriented frontend architecture"
+    assert payload["repository_shape"]["source_roots"] == ["src"]
+    assert payload["repository_shape"]["dominant_file_roles"] == ["component", "page", "hook"]
+    assert payload["dependency_flows"] == [
+        {"from": "page", "to": "component", "count": 1},
+        {"from": "component", "to": "hook", "count": 1},
+    ]
     assert payload["graph_source"].endswith("graph.json")
 
 

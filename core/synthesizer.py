@@ -49,7 +49,7 @@ class PromptSynthesizer:
             "Infer the existing architecture and conventions from the provided graph summary. "
             "Preserve the repository's current stack and style instead of forcing a different one. "
             "Avoid vague wording. Prefer explicit, enforceable rules that reference detected frameworks, "
-            "naming patterns, and validation tools when available. "
+            "directories, dependency flows, naming patterns, file placement patterns, and validation tools when available. "
             "Do not name specific tools, frameworks, or libraries unless they are supported by the analysis payload."
         )
         user_prompt = f"""
@@ -57,44 +57,75 @@ Generate a repository-specific .cursorrules file using the analysis payload belo
 
 Requirements:
 1. Output plain text only. Do not wrap the file in code fences.
-2. Tailor every rule to the detected language, framework, architecture, naming, and test posture.
+2. Tailor every rule to the detected language, framework, architecture, naming, repository shape, dependency flows, and test posture.
 3. Do not mention technologies that are not supported by the payload.
-4. If the analysis is ambiguous, instruct the coding agent to preserve existing conventions and avoid speculative rewrites.
+4. If the analysis is ambiguous, instruct the coding agent to preserve existing conventions, mirror neighboring files, and avoid speculative rewrites.
 5. Do not use vague phrases such as "mixed approach", "compatible framework", "use appropriate tooling", or "follow best practices".
-6. In [ARCHITECTURE RULES], explicitly forbid broad refactors, folder moves, file renames, architecture migrations, dependency swaps, or global formatting changes unless explicitly requested.
-7. In [CODE STYLE], explicitly say: follow the naming convention already used in the touched directory, and do not rename files unless required for the requested change.
+6. In [ARCHITECTURE RULES]:
+   - Convert detected architecture type, source roots, module paths, entrypoints, file roles, and dependency flows into explicit boundaries when that evidence exists in the payload.
+   - Mention concrete directories, layers, or module names from the payload instead of generic labels whenever possible.
+   - If the payload shows layered boundaries such as controllers/services/repositories or pages/components/hooks, preserve those boundaries explicitly.
+   - Explicitly forbid broad refactors, folder moves, file renames, architecture migrations, dependency swaps, or global formatting changes unless explicitly requested.
+7. In [CODE STYLE]:
+   - Explicitly say: follow the naming convention already used in the touched directory, and do not rename files unless required for the requested change.
+   - If the payload includes class, function, or file naming patterns, state those naming patterns directly.
+   - If the payload shows recurring file role suffixes or prefixes, preserve those local patterns instead of introducing a new naming scheme.
 8. In [TESTING AND VALIDATION]:
    - Use the existing test setup already configured in the repository.
    - If the payload mentions test framework hints, prefer the matching configured framework and name only those exact frameworks.
    - Do not introduce a new test runner unless no test setup exists and the task explicitly requires tests.
+   - Mirror the detected test file placement and filename style when adding or updating tests.
 9. Include a dedicated [BUG FIX PROTOCOL] section with these rules:
    - First reproduce or reason through the reported bug using the smallest relevant code path.
    - Identify the root cause before making changes.
+   - When fixing a bug, change the minimum number of lines required.
    - Apply the smallest safe fix in the affected service, component, or utility.
+   - Change only the condition that is wrong. Leave correct conditions untouched.
    - Do not rewrite unrelated logic while fixing the bug.
+   - If business rules are unclear, ask before editing instead of assuming.
    - Add or update a regression test that fails before the fix and passes after the fix, when practical.
    - Preserve public contracts and user-visible behavior according to [PUBLIC CONTRACT SAFETY] unless the bug itself is caused by an incorrect contract.
+   - If the user clarifies business rules mid-task, revert wrong assumptions and apply only the final agreed rules. Do not layer fixes on top of earlier wrong fixes.
    - Validate nearby edge cases related to the bug.
    - In the final response, explain the root cause, files changed, fix summary, and tests run.
-10. In [PERFORMANCE HYGIENE], state that performance work should happen only when touching performance-sensitive paths or when a measurable bottleneck is identified. Do not add caching, memoization, batching, or lazy loading preemptively.
-11. Add a dedicated [PUBLIC CONTRACT SAFETY] section that explicitly forbids changing public APIs, exported names, route paths, request and response shapes, schema contracts, persistence formats, or user-visible UI behavior unless explicitly requested.
-12. In [DATA SAFETY], include rules that:
+10. Add a dedicated [DIFF HYGIENE] section with these rules:
+   - The diff must contain only intentional changes.
+   - Never leave commented-out old code in the file.
+   - Preserve existing indentation, line breaks, and naming in untouched code.
+11. Add a dedicated [FILE PLACEMENT] section with these rules:
+   - Say where new files belong based on detected source roots, module paths, and co-location patterns from the payload.
+   - Prefer placing code beside the feature or layer being changed instead of creating a new top-level folder when an existing location already fits.
+   - If the payload is weak, instruct the agent to mirror the nearest neighboring file layout.
+12. Add a dedicated [DEPENDENCY HYGIENE] section with these rules:
+   - Respect observed dependency flows and layer boundaries from the payload.
+   - Keep imports and call direction aligned with neighboring modules instead of reaching across unrelated layers.
+   - Do not bypass an existing service, repository, adapter, hook, store, or shared utility boundary without proof from surrounding code.
+13. Add a dedicated [PROVE BEFORE EXPANDING] section with these rules:
+   - Before adding defensive code such as null checks, try-catch blocks, caching, eager-loading expansions, or similar safeguards, explain why the existing code fails without it.
+   - If that failure is not proven, do not add the defensive code.
+14. In [PERFORMANCE HYGIENE], state that performance work should happen only when touching performance-sensitive paths or when a measurable bottleneck is identified. Do not add caching, memoization, batching, or lazy loading preemptively.
+15. Add a dedicated [PUBLIC CONTRACT SAFETY] section that explicitly forbids changing public APIs, exported names, route paths, request and response shapes, schema contracts, persistence formats, or user-visible UI behavior unless explicitly requested.
+16. In [DATA SAFETY], include rules that:
    - Do not expose secrets, tokens, credentials, PII, or sensitive data in logs, errors, analytics, test snapshots, fixtures, or UI output.
    - Validate and sanitize external input.
    - Do not weaken authentication, authorization, encryption, auditability, or permission checks.
-13. In [COMMUNICATION STYLE], require the final response to summarize changed files if edits were made; otherwise summarize proposed files and changes. Also summarize behavior impact and tests or validation run.
-14. Include these exact sections:
+17. In [COMMUNICATION STYLE], require the final response to summarize changed files if edits were made; otherwise summarize proposed files and changes. Also summarize behavior impact, architecture impact, and tests or validation run.
+18. Include these exact sections:
 [ROLE]
 [ARCHITECTURE RULES]
 [CODE STYLE]
 [TESTING AND VALIDATION]
 [BUG FIX PROTOCOL]
+[DIFF HYGIENE]
+[FILE PLACEMENT]
+[DEPENDENCY HYGIENE]
+[PROVE BEFORE EXPANDING]
 [PERFORMANCE HYGIENE]
 [PUBLIC CONTRACT SAFETY]
 [DATA SAFETY]
 [COMMUNICATION STYLE]
-15. Keep the rules strict, concise, and enforceable.
-16. Focus on change safety: preserve public behavior, avoid unrelated edits, and require targeted validation.
+19. Keep the rules strict, concise, and enforceable.
+20. Focus on change safety: preserve public behavior, avoid unrelated edits, and require targeted validation.
 
 Analysis payload:
 {payload}

@@ -55,6 +55,25 @@ TEST_FRAMEWORK_SIGNATURES = {
     "NUnit": ("nunit",),
 }
 
+TEST_ROOT_NAMES = {"test", "tests", "spec", "specs", "__tests__"}
+
+FILE_ROLE_MARKERS = {
+    "controller": ("controller",),
+    "service": ("service",),
+    "repository": ("repository", "repo"),
+    "component": ("component", "components"),
+    "page": ("page", "pages"),
+    "hook": ("hook", "hooks"),
+    "model": ("model", "models"),
+    "view": ("view", "views"),
+    "adapter": ("adapter", "adapters"),
+    "store": ("store", "stores"),
+    "middleware": ("middleware",),
+    "schema": ("schema", "schemas"),
+    "serializer": ("serializer", "serializers"),
+    "util": ("util", "utils", "helper", "helpers"),
+}
+
 ENTRYPOINT_PATTERNS = {
     "main.py",
     "app.py",
@@ -176,6 +195,49 @@ class GraphifyHeuristicParser:
             return Path(node_path).stem
         node_id = self._node_id(node)
         return Path(node_id).stem if Path(node_id).suffix else node_id
+
+    def _normalize_path(self, node_path: str) -> str:
+        return node_path.replace("\\", "/").strip()
+
+    def _path_parts(self, node_path: str) -> list[str]:
+        normalized = self._normalize_path(node_path)
+        return [part for part in normalized.split("/") if part and part != "."]
+
+    def _top_directory_from_path(self, node_path: str) -> str:
+        parts = self._path_parts(node_path)
+        if len(parts) < 2:
+            return ""
+        return parts[0]
+
+    def _parent_directory(self, node_path: str) -> str:
+        normalized = self._normalize_path(node_path)
+        parent = str(Path(normalized).parent).replace("\\", "/")
+        return "" if parent == "." else parent
+
+    def _matches_role_marker(self, path_parts: list[str], stem: str, marker: str) -> bool:
+        return (
+            any(part == marker or part == f"{marker}s" for part in path_parts)
+            or stem == marker
+            or stem.endswith(f"_{marker}")
+            or stem.endswith(f".{marker}")
+            or stem.endswith(f"-{marker}")
+        )
+
+    def _classify_file_role(self, node_path: str) -> str | None:
+        normalized = self._normalize_path(node_path).lower()
+        path_parts = self._path_parts(normalized)
+        if not path_parts:
+            return None
+
+        stem = Path(normalized).stem.lower()
+        for role, markers in FILE_ROLE_MARKERS.items():
+            if any(self._matches_role_marker(path_parts, stem, marker) for marker in markers):
+                return role
+
+        if stem.startswith("use") and Path(normalized).suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
+            return "hook"
+
+        return None
 
     def detect_architecture_pattern(self) -> dict:
         corpus = " ".join(
@@ -343,6 +405,70 @@ class GraphifyHeuristicParser:
         ]
         return hints[:5]
 
+    def summarize_repository_shape(self) -> dict:
+        top_dir_counts: Counter[str] = Counter()
+        source_root_counts: Counter[str] = Counter()
+        test_root_counts: Counter[str] = Counter()
+        parent_dir_counts: Counter[str] = Counter()
+        role_counts: Counter[str] = Counter()
+
+        for node in self.nodes:
+            node_path = self._node_path(node)
+            if not node_path:
+                continue
+
+            normalized = self._normalize_path(node_path)
+            top_dir = self._top_directory_from_path(normalized)
+            if top_dir:
+                top_dir_counts[top_dir] += 1
+                if top_dir.lower() in TEST_ROOT_NAMES or "test" in top_dir.lower() or "spec" in top_dir.lower():
+                    test_root_counts[top_dir] += 1
+                else:
+                    source_root_counts[top_dir] += 1
+
+            parent_dir = self._parent_directory(normalized)
+            if parent_dir:
+                parent_dir_counts[parent_dir] += 1
+
+            role = self._classify_file_role(normalized)
+            if role:
+                role_counts[role] += 1
+
+        return {
+            "top_directories": [
+                {"path": path, "count": count}
+                for path, count in top_dir_counts.most_common(6)
+            ],
+            "source_roots": [path for path, _ in source_root_counts.most_common(4)],
+            "test_roots": [path for path, _ in test_root_counts.most_common(4)],
+            "module_path_examples": [path for path, _ in parent_dir_counts.most_common(8)],
+            "dominant_file_roles": [role for role, _ in role_counts.most_common(6)],
+        }
+
+    def infer_dependency_flows(self) -> list[dict]:
+        node_paths = {
+            self._node_id(node): self._normalize_path(self._node_path(node))
+            for node in self.nodes
+            if self._node_id(node) and self._node_path(node)
+        }
+        flow_counts: Counter[tuple[str, str]] = Counter()
+
+        for edge in self.edges:
+            source_path = node_paths.get(edge["source"])
+            target_path = node_paths.get(edge["target"])
+            if not source_path or not target_path:
+                continue
+
+            source_role = self._classify_file_role(source_path)
+            target_role = self._classify_file_role(target_path)
+            if source_role and target_role and source_role != target_role:
+                flow_counts[(source_role, target_role)] += 1
+
+        return [
+            {"from": source, "to": target, "count": count}
+            for (source, target), count in flow_counts.most_common(6)
+        ]
+
     def identify_structural_hotspots(self) -> list[dict]:
         if not self.graph.nodes:
             return []
@@ -411,6 +537,8 @@ class GraphifyHeuristicParser:
         languages = self.infer_languages()
         frameworks = self.infer_framework_hints()
         test_frameworks = self.infer_test_framework_hints()
+        repository_shape = self.summarize_repository_shape()
+        dependency_flows = self.infer_dependency_flows()
 
         payload = {
             "graph_source": str(self.resolve_graph_path()),
@@ -430,6 +558,8 @@ class GraphifyHeuristicParser:
                 "has_tests": tests["has_tests"],
                 "sample_test_files": tests["sample_test_files"],
             },
+            "repository_shape": repository_shape,
+            "dependency_flows": dependency_flows,
             "naming_patterns": naming,
             "hotspots": hotspots,
             "top_node_types": self.top_node_types(),
