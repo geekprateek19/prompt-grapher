@@ -1,0 +1,131 @@
+{
+  "name": "prompt-grapher-vscode",
+  "displayName": "PromptGrapher",
+  "description": "Generate repository-specific Cursor rules and AGENTS.md files from the current VS Code workspace.",
+  "version": "0.0.1",
+  "publisher": "geekprateek",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:promptGrapher.generateRules",
+    "onCommand:promptGrapher.generateRulesReuseGraph",
+    "onCommand:promptGrapher.setApiKey",
+    "onCommand:promptGrapher.clearApiKey"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptGrapher.generateRules",
+        "title": "PromptGrapher: Generate Rules"
+      },
+      {
+        "command": "promptGrapher.generateRulesReuseGraph",
+        "title": "PromptGrapher: Generate Rules (Reuse Graph)"
+      },
+      {
+        "command": "promptGrapher.setApiKey",
+        "title": "PromptGrapher: Set API Key"
+      },
+      {
+        "command": "promptGrapher.clearApiKey",
+        "title": "PromptGrapher: Clear API Key"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "promptGrapher.generateRules",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        },
+        {
+          "command": "promptGrapher.generateRulesReuseGraph",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "PromptGrapher",
+      "properties": {
+        "promptGrapher.cliPath": {
+          "type": "string",
+          "default": "prompt-grapher",
+          "description": "Executable used by the extension. Point this to the prompt-grapher binary if it is not already available on PATH."
+        },
+        "promptGrapher.model": {
+          "type": "string",
+          "default": "",
+          "description": "Optional AI model override. When blank, PromptGrapher falls back to AI_MODEL_NAME or the local .env file."
+        },
+        "promptGrapher.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional AI base URL override for OpenAI-compatible providers."
+        },
+        "promptGrapher.graphifyStrategy": {
+          "type": "string",
+          "default": "code-only",
+          "enum": [
+            "code-only",
+            "semantic"
+          ],
+          "description": "Graph bootstrap mode passed to prompt-grapher analyze."
+        },
+        "promptGrapher.graphifyBackend": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Graphify backend override used only with the semantic bootstrap strategy."
+        },
+        "promptGrapher.graphifyModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Graphify model override."
+        },
+        "promptGrapher.graphifyArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional arguments forwarded to Graphify. Each item becomes a repeated --graphify-arg flag."
+        },
+        "promptGrapher.outputFile": {
+          "type": "string",
+          "default": ".cursor/rules/project-rules.mdc",
+          "description": "Relative output path for the generated Cursor rules file."
+        },
+        "promptGrapher.agentsFile": {
+          "type": "string",
+          "default": "AGENTS.md",
+          "description": "Relative output path for the generated AGENTS.md file."
+        },
+        "promptGrapher.legacyCursorRulesFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional relative output path for a legacy .cursorrules file."
+        },
+        "promptGrapher.showMetrics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Print the parsed PromptGrapher heuristic summary into the Output panel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.57",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.8.3"
+  }
+}

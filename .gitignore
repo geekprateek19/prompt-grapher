@@ -51,3 +51,5 @@ Thumbs.db
 graphify-out/
 .coverage
 htmlcov/
+node_modules/
+*.vsix
