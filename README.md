@@ -91,3 +91,11 @@ prompt-grapher analyze /path/to/project --model gpt-4.1-mini --output-file .curs
 pip install -e .[dev]
 pytest
 ```
+
+## VS Code Extension Scaffold
+
+This repository now includes a bridge-style VS Code extension under [vscode-extension](</d:/prompt-grapher/vscode-extension/README.md>).
+
+- The extension reuses the existing Python `prompt-grapher` CLI instead of reimplementing the backend in TypeScript.
+- You still need Python plus an installed `prompt-grapher` executable.
+- Extension-specific setup, commands, and packaging steps are documented in `vscode-extension/README.md`.
