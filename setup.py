@@ -10,7 +10,7 @@ setup(
     name="prompt-grapher",
     version="1.4.1",
     author="geekprateek",
-    description="Generate repository-specific Cursor rules and AGENTS.md files from Graphify dependency graphs.",
+    description="Generate repository-specific Cursor rules, AGENTS.md, onboarding docs, and AI memory packs from Graphify dependency graphs.",
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     packages=find_packages(),

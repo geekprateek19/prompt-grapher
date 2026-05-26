@@ -1,9 +1,10 @@
 {
   "name": "prompt-grapher-vscode",
   "displayName": "PromptGrapher",
-  "description": "Generate repository-specific Cursor rules, AGENTS.md, onboarding docs, and AI memory packs from the current VS Code workspace.",
-  "version": "0.0.1",
+  "description": "Workspace VS Code bridge for PromptGrapher's TypeScript migration shell.",
+  "version": "0.1.0",
   "publisher": "geekprateek",
+  "private": true,
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -14,6 +15,7 @@
   "activationEvents": [
     "onCommand:promptGrapher.generateRules",
     "onCommand:promptGrapher.generateRulesReuseGraph",
+    "onCommand:promptGrapher.generateFeaturePack",
     "onCommand:promptGrapher.generateBugFixPack",
     "onCommand:promptGrapher.generateClientHandoff",
     "onCommand:promptGrapher.setApiKey",
@@ -29,6 +31,10 @@
       {
         "command": "promptGrapher.generateRulesReuseGraph",
         "title": "PromptGrapher: Generate Rules (Reuse Graph)"
+      },
+      {
+        "command": "promptGrapher.generateFeaturePack",
+        "title": "PromptGrapher: Generate Feature Prompt Pack"
       },
       {
         "command": "promptGrapher.generateBugFixPack",
@@ -60,6 +66,11 @@
           "group": "navigation"
         },
         {
+          "command": "promptGrapher.generateFeaturePack",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        },
+        {
           "command": "promptGrapher.generateBugFixPack",
           "when": "explorerResourceIsFolder",
           "group": "navigation"
@@ -74,10 +85,20 @@
     "configuration": {
       "title": "PromptGrapher",
       "properties": {
-        "promptGrapher.cliPath": {
+        "promptGrapher.bridgeCommand": {
           "type": "string",
           "default": "prompt-grapher",
-          "description": "Executable used by the extension. Point this to the prompt-grapher binary if it is not already available on PATH."
+          "description": "Temporary bridge command used to run the legacy Python PromptGrapher CLI during the TypeScript migration."
+        },
+        "promptGrapher.pythonBin": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Python executable used when bridging via a local cli.py entrypoint."
+        },
+        "promptGrapher.pythonEntry": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the Python cli.py entrypoint used for local migration work."
         },
         "promptGrapher.model": {
           "type": "string",
@@ -134,17 +155,17 @@
         "promptGrapher.onboardingDocsDir": {
           "type": "string",
           "default": "",
-          "description": "Optional relative directory for generated onboarding docs such as PROJECT_OVERVIEW.md and HOW_TO_RUN.md."
+          "description": "Optional relative directory for generated onboarding docs."
         },
         "promptGrapher.memoryPackDir": {
           "type": "string",
           "default": "",
-          "description": "Optional relative directory for assistant memory-pack files such as CLAUDE.md, PROJECT_MEMORY.md, and FEATURE_PROMPTS.md."
+          "description": "Optional relative directory for generated assistant memory-pack files."
         },
-        "promptGrapher.featureRequest": {
+        "promptGrapher.featurePackDir": {
           "type": "string",
           "default": "",
-          "description": "Optional natural-language change request used to generate a request-specific prompt pack and relevant files."
+          "description": "Optional relative directory for generated feature implementation prompt packs."
         },
         "promptGrapher.bugPackDir": {
           "type": "string",
@@ -156,6 +177,11 @@
           "default": "",
           "description": "Optional relative directory for generated client handoff packs. The Generate Client Handoff Pack command defaults to docs/handoff when this is blank."
         },
+        "promptGrapher.featureRequest": {
+          "type": "string",
+          "default": "",
+          "description": "Optional natural-language request injected into the generated feature prompt pack."
+        },
         "promptGrapher.showMetrics": {
           "type": "boolean",
           "default": false,
@@ -166,7 +192,12 @@
   },
   "scripts": {
     "build": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "typecheck": "tsc -p ./ --noEmit",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "@prompt-grapher/core": "workspace:*",
+    "@prompt-grapher/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.17.57",

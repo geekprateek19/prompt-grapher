@@ -45,6 +45,10 @@ MANIFEST
 # 5. OS Specific System Traces & IDE Cache Directories
 # Cleans project layouts across different developer stations
 .vscode/
+!.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 .DS_Store
 Thumbs.db

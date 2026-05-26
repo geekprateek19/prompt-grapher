@@ -1,0 +1,23 @@
+{
+  "name": "prompt-grapher",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "prompt-grapher": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\""
+  },
+  "dependencies": {
+    "@prompt-grapher/core": "workspace:*",
+    "@prompt-grapher/shared": "workspace:*",
+    "commander": "^12.1.0"
+  }
+}

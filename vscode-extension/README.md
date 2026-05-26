@@ -1,14 +1,22 @@
 # PromptGrapher VS Code Extension
 
+This folder is the legacy standalone scaffold. The new migration target now lives under `packages/vscode` inside the `pnpm` workspace, but this bridge remains useful until the TypeScript cutover is complete.
+
 This extension is a thin VS Code bridge around the existing Python `prompt-grapher` CLI. It does not reimplement the parser or synthesizer in TypeScript. Instead, it runs your installed PromptGrapher backend against the current workspace and streams the logs into a VS Code output panel.
 
 ## What it does
 
 - Adds `PromptGrapher: Generate Rules`
 - Adds `PromptGrapher: Generate Rules (Reuse Graph)`
+- Adds `PromptGrapher: Generate Bug Fix Pack`
+- Adds `PromptGrapher: Generate Client Handoff Pack`
 - Stores the API key in VS Code SecretStorage
 - Forwards model, base URL, Graphify strategy, and output file settings to the Python CLI
 - Opens the generated `.cursor/rules/project-rules.mdc` and `AGENTS.md` files after success
+- Optionally generates onboarding docs when `PromptGrapher: Onboarding Docs Dir` is configured
+- Optionally generates an assistant memory pack when `PromptGrapher: Memory Pack Dir` is configured
+- Optionally generates a bug-fix context pack when `PromptGrapher: Bug Pack Dir` is configured
+- Optionally generates a client handoff pack when `PromptGrapher: Handoff Pack Dir` is configured
 
 ## Requirements
 
@@ -54,9 +62,53 @@ Your existing local `.env` handling inside PromptGrapher still works.
   "promptGrapher.cliPath": "D:\\prompt-grapher\\.venv\\Scripts\\prompt-grapher.exe",
   "promptGrapher.model": "gpt-4.1-mini",
   "promptGrapher.graphifyStrategy": "code-only",
+  "promptGrapher.onboardingDocsDir": "docs/onboarding",
+  "promptGrapher.memoryPackDir": ".ai-memory",
+  "promptGrapher.featureRequest": "Mujhe auth module modify karna hai",
+  "promptGrapher.handoffPackDir": "docs/handoff",
   "promptGrapher.showMetrics": false
 }
 ```
+
+When `promptGrapher.onboardingDocsDir` is non-empty, the extension forwards `--onboarding-docs-dir` to the Python CLI and generates:
+
+- `PROJECT_OVERVIEW.md`
+- `ARCHITECTURE.md`
+- `DATABASE_FLOW.md`
+- `API_MAP.md`
+- `IMPORTANT_FILES.md`
+- `HOW_TO_RUN.md`
+- `KNOWN_RISKS.md`
+
+When `promptGrapher.memoryPackDir` is non-empty, the extension forwards `--memory-pack-dir` and generates:
+
+- `CLAUDE.md`
+- `CURSOR_RULES.md`
+- `CODING_STYLE.md`
+- `PROJECT_MEMORY.md`
+- `FEATURE_PROMPTS.md`
+
+If `promptGrapher.featureRequest` is also set, PromptGrapher injects a request-specific context pack into `FEATURE_PROMPTS.md`, including relevant files and an exact prompt for the requested change.
+
+When `promptGrapher.bugPackDir` is non-empty, the extension forwards `--bug-pack-dir` and the `Generate Bug Fix Pack` command forwards `--bug-report`, producing:
+
+- `RELATED_FILES.md`
+- `API_SUSPECTS.md`
+- `DATABASE_SUSPECTS.md`
+- `FRONTEND_SUSPECTS.md`
+- `INVESTIGATION_PROMPT.md`
+- `BACKEND_FIX_PROMPT.md`
+- `REGRESSION_TEST_PROMPT.md`
+
+When `promptGrapher.handoffPackDir` is non-empty, or when you run `Generate Client Handoff Pack`, the extension forwards `--handoff-pack-dir` and produces:
+
+- `TECHNICAL_DOCS.md`
+- `SETUP_GUIDE.md`
+- `DEPLOYMENT_GUIDE.md`
+- `API_DOCUMENTATION.md`
+- `DATABASE_DOCUMENTATION.md`
+- `FUTURE_IMPROVEMENTS.md`
+- `AI_MAINTENANCE_PROMPTS.md`
 
 ## Development
 
