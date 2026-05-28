@@ -175,6 +175,41 @@ def init(force: bool) -> None:
     help="Optional legacy .cursorrules output path for older workflows.",
 )
 @click.option(
+    "--onboarding-docs-dir",
+    default=None,
+    help="Optional directory for generated onboarding documentation files such as PROJECT_OVERVIEW.md and HOW_TO_RUN.md.",
+)
+@click.option(
+    "--memory-pack-dir",
+    default=None,
+    help="Optional directory for assistant memory-pack files such as CLAUDE.md, CURSOR_RULES.md, and FEATURE_PROMPTS.md.",
+)
+@click.option(
+    "--feature-pack-dir",
+    default=None,
+    help="Optional directory for a feature implementation prompt pack with backend, frontend, test, and migration prompts.",
+)
+@click.option(
+    "--bug-pack-dir",
+    default=None,
+    help="Optional directory for a bug-fix context pack with related files, investigation prompts, and regression-test prompts.",
+)
+@click.option(
+    "--handoff-pack-dir",
+    default=None,
+    help="Optional directory for a client handoff pack with technical docs, setup, deployment, API, database, and maintenance prompts.",
+)
+@click.option(
+    "--feature-request",
+    default=None,
+    help="Optional natural-language change request used to generate a request-specific prompt pack and relevant file list.",
+)
+@click.option(
+    "--bug-report",
+    default=None,
+    help="Optional bug report or symptom statement used to generate a debugging context pack.",
+)
+@click.option(
     "--quiet-metrics/--show-metrics",
     default=False,
     show_default=True,
@@ -196,6 +231,13 @@ def analyze(
     output_file: str,
     agents_file: str,
     legacy_cursorrules_file: str | None,
+    onboarding_docs_dir: str | None,
+    memory_pack_dir: str | None,
+    feature_pack_dir: str | None,
+    bug_pack_dir: str | None,
+    handoff_pack_dir: str | None,
+    feature_request: str | None,
+    bug_report: str | None,
     quiet_metrics: bool,
 ) -> None:
     """Analyze a project and generate repository-specific Cursor and agent rules."""
@@ -234,12 +276,33 @@ def analyze(
             f"Expected one of {expected}, or provide --graph-input explicitly."
         )
 
+    if feature_request and bug_report:
+        raise click.ClickException("Use either --feature-request or --bug-report, not both in the same run.")
+    if feature_pack_dir and not feature_request:
+        raise click.ClickException("--feature-pack-dir requires --feature-request.")
+    if bug_pack_dir and not bug_report:
+        raise click.ClickException("--bug-pack-dir requires --bug-report.")
+
     parser = GraphifyHeuristicParser(project_path=project_path, graph_path=graph_path)
     dna_metrics = parser.compile_heuristics_payload()
+    if feature_request:
+        dna_metrics["feature_request_context"] = parser.build_feature_request_context(feature_request, dna_metrics)
+    if bug_report:
+        dna_metrics["bug_report_context"] = parser.build_bug_report_context(bug_report, dna_metrics)
 
     if not quiet_metrics:
         click.echo("[PromptGrapher] Heuristic summary:")
         click.echo(json.dumps(dna_metrics, indent=2))
+    elif feature_request and not memory_pack_dir and not feature_pack_dir:
+        click.echo(
+            "[PromptGrapher] Feature request context computed. "
+            "Use --show-metrics, --memory-pack-dir, or --feature-pack-dir to inspect the generated prompt pack."
+        )
+    elif bug_report and not bug_pack_dir:
+        click.echo(
+            "[PromptGrapher] Bug report context computed. "
+            "Use --show-metrics or --bug-pack-dir to inspect the generated debug pack."
+        )
 
     synthesizer = PromptSynthesizer(base_url=base_url, api_key=api_key, model_name=model)
     generated_files = synthesizer.generate_rule_files(
@@ -249,6 +312,46 @@ def analyze(
         agents_filename=agents_file,
         legacy_cursorrules_filename=legacy_cursorrules_file,
     )
+    if onboarding_docs_dir:
+        generated_files.update(
+            synthesizer.generate_onboarding_files(
+                dna_metrics,
+                output_path=project_path,
+                docs_dir=onboarding_docs_dir,
+            )
+        )
+    if memory_pack_dir:
+        generated_files.update(
+            synthesizer.generate_memory_pack_files(
+                dna_metrics,
+                output_path=project_path,
+                pack_dir=memory_pack_dir,
+            )
+        )
+    if feature_pack_dir:
+        generated_files.update(
+            synthesizer.generate_feature_pack_files(
+                dna_metrics,
+                output_path=project_path,
+                pack_dir=feature_pack_dir,
+            )
+        )
+    if bug_pack_dir:
+        generated_files.update(
+            synthesizer.generate_bug_pack_files(
+                dna_metrics,
+                output_path=project_path,
+                pack_dir=bug_pack_dir,
+            )
+        )
+    if handoff_pack_dir:
+        generated_files.update(
+            synthesizer.generate_handoff_pack_files(
+                dna_metrics,
+                output_path=project_path,
+                pack_dir=handoff_pack_dir,
+            )
+        )
 
     for label, file_path in generated_files.items():
         click.echo(f"[PromptGrapher] {label} generated at {file_path}")

@@ -1,56 +1,42 @@
 import * as path from "node:path";
 import { spawn } from "node:child_process";
+
 import * as vscode from "vscode";
+
+import { createAnalyzeBridgeInvocation } from "@prompt-grapher/core";
+import {
+  BUG_PACK_FILENAMES,
+  DEFAULT_AGENTS_FILE,
+  DEFAULT_CURSOR_RULES_FILE,
+  DEFAULT_HANDOFF_PACK_DIR,
+  defaultBugPackDirForReport,
+  defaultFeaturePackDirForRequest,
+  FEATURE_PACK_FILENAMES,
+  HANDOFF_PACK_FILENAMES,
+  MEMORY_PACK_FILENAMES,
+  ONBOARDING_DOC_FILENAMES,
+  PromptGrapherAnalyzeOptions,
+} from "@prompt-grapher/shared";
 
 const API_KEY_SECRET = "promptGrapher.apiKey";
 const OUTPUT_CHANNEL_NAME = "PromptGrapher";
-const ONBOARDING_DOC_FILENAMES = [
-  "PROJECT_OVERVIEW.md",
-  "ARCHITECTURE.md",
-  "DATABASE_FLOW.md",
-  "API_MAP.md",
-  "IMPORTANT_FILES.md",
-  "HOW_TO_RUN.md",
-  "KNOWN_RISKS.md",
-] as const;
-const MEMORY_PACK_FILENAMES = [
-  "CLAUDE.md",
-  "CURSOR_RULES.md",
-  "CODING_STYLE.md",
-  "PROJECT_MEMORY.md",
-  "FEATURE_PROMPTS.md",
-] as const;
-const BUG_PACK_FILENAMES = [
-  "RELATED_FILES.md",
-  "API_SUSPECTS.md",
-  "DATABASE_SUSPECTS.md",
-  "FRONTEND_SUSPECTS.md",
-  "INVESTIGATION_PROMPT.md",
-  "BACKEND_FIX_PROMPT.md",
-  "REGRESSION_TEST_PROMPT.md",
-] as const;
-const HANDOFF_PACK_FILENAMES = [
-  "TECHNICAL_DOCS.md",
-  "SETUP_GUIDE.md",
-  "DEPLOYMENT_GUIDE.md",
-  "API_DOCUMENTATION.md",
-  "DATABASE_DOCUMENTATION.md",
-  "FUTURE_IMPROVEMENTS.md",
-  "AI_MAINTENANCE_PROMPTS.md",
-] as const;
 
 type GenerateOptions = {
   reuseGraph: boolean;
+  featureRequest?: string;
+  forceFeaturePack?: boolean;
   bugReport?: string;
   forceBugPack?: boolean;
   forceHandoffPack?: boolean;
 };
 
 type PromptGrapherConfig = {
-  cliPath: string;
+  bridgeCommand: string;
+  pythonBin: string;
+  pythonEntry: string;
   model: string;
   baseUrl: string;
-  graphifyStrategy: string;
+  graphifyStrategy: "code-only" | "semantic";
   graphifyBackend: string;
   graphifyModel: string;
   graphifyArgs: string[];
@@ -59,6 +45,7 @@ type PromptGrapherConfig = {
   legacyCursorRulesFile: string;
   onboardingDocsDir: string;
   memoryPackDir: string;
+  featurePackDir: string;
   featureRequest: string;
   bugPackDir: string;
   handoffPackDir: string;
@@ -75,6 +62,29 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("promptGrapher.generateRulesReuseGraph", async (resource?: vscode.Uri) => {
       await runGenerateRules(context, output, { reuseGraph: true }, resource);
+    }),
+    vscode.commands.registerCommand("promptGrapher.generateFeaturePack", async (resource?: vscode.Uri) => {
+      const featureRequest = await vscode.window.showInputBox({
+        title: "PromptGrapher Feature Request",
+        prompt: "Example: Add payment gateway or Mujhe auth module modify karna hai",
+        ignoreFocusOut: true,
+        validateInput: (value) => (value.trim() ? undefined : "Feature request cannot be empty."),
+      });
+
+      if (!featureRequest) {
+        return;
+      }
+
+      await runGenerateRules(
+        context,
+        output,
+        {
+          reuseGraph: false,
+          featureRequest: featureRequest.trim(),
+          forceFeaturePack: true,
+        },
+        resource,
+      );
     }),
     vscode.commands.registerCommand("promptGrapher.generateBugFixPack", async (resource?: vscode.Uri) => {
       const bugReport = await vscode.window.showInputBox({
@@ -134,13 +144,15 @@ async function runGenerateRules(
   }
 
   const config = loadConfig(folder);
-  if (!config.cliPath) {
-    vscode.window.showErrorMessage("Set PromptGrapher: CLI Path before running the extension.");
-    return;
-  }
-
   const apiKey = await context.secrets.get(API_KEY_SECRET);
-  const args = buildAnalyzeArgs(folder, config, options);
+  const analyzeOptions = buildAnalyzeOptions(folder, config, options);
+  const invocation = createAnalyzeBridgeInvocation(analyzeOptions, {
+    cwd: folder.uri.fsPath,
+    cliCommand: config.bridgeCommand,
+    pythonBin: config.pythonBin || undefined,
+    pythonEntry: config.pythonEntry || undefined,
+  });
+
   const env = {
     ...process.env,
     ...(apiKey ? { AI_API_KEY: apiKey } : {}),
@@ -151,7 +163,7 @@ async function runGenerateRules(
   output.clear();
   output.show(true);
   output.appendLine(`[PromptGrapher] Workspace: ${folder.uri.fsPath}`);
-  output.appendLine(`[PromptGrapher] Command: ${config.cliPath} ${quoteArgs(args).join(" ")}`);
+  output.appendLine(`[PromptGrapher] Bridge: ${invocation.displayCommand}`);
 
   try {
     await vscode.window.withProgress(
@@ -162,10 +174,10 @@ async function runGenerateRules(
       },
       (_progress, token) =>
         new Promise<void>((resolve, reject) => {
-          const child = spawn(config.cliPath, args, {
+          const child = spawn(invocation.command, invocation.args, {
             cwd: folder.uri.fsPath,
             env,
-            shell: process.platform === "win32",
+            shell: invocation.shell,
           });
 
           let cancellationRequested = false;
@@ -198,8 +210,8 @@ async function runGenerateRules(
             const typedError = error as NodeJS.ErrnoException;
             const message =
               typedError.code === "ENOENT"
-                ? `Unable to find '${config.cliPath}'. Install PromptGrapher first or set PromptGrapher: CLI Path.`
-                : `PromptGrapher failed to start: ${error.message}`;
+                ? `Unable to start '${invocation.command}'. Check PromptGrapher bridge settings.`
+                : `PromptGrapher bridge failed to start: ${error.message}`;
             output.appendLine(`[PromptGrapher] ${message}`);
             vscode.window.showErrorMessage(message);
             reject(error);
@@ -220,7 +232,7 @@ async function runGenerateRules(
 
             if (code === 0) {
               output.appendLine("[PromptGrapher] Generation completed.");
-              await openGeneratedFiles(folder, config, options);
+              await openGeneratedFiles(folder, config, analyzeOptions);
               vscode.window.showInformationMessage("PromptGrapher generation completed.");
               resolve();
               return;
@@ -265,18 +277,21 @@ function loadConfig(folder: vscode.WorkspaceFolder): PromptGrapherConfig {
   const config = vscode.workspace.getConfiguration("promptGrapher", folder.uri);
 
   return {
-    cliPath: config.get<string>("cliPath", "prompt-grapher").trim(),
+    bridgeCommand: config.get<string>("bridgeCommand", "prompt-grapher").trim(),
+    pythonBin: config.get<string>("pythonBin", "").trim(),
+    pythonEntry: config.get<string>("pythonEntry", "").trim(),
     model: config.get<string>("model", "").trim(),
     baseUrl: config.get<string>("baseUrl", "").trim(),
-    graphifyStrategy: config.get<string>("graphifyStrategy", "code-only").trim() || "code-only",
+    graphifyStrategy: config.get<"code-only" | "semantic">("graphifyStrategy", "code-only"),
     graphifyBackend: config.get<string>("graphifyBackend", "").trim(),
     graphifyModel: config.get<string>("graphifyModel", "").trim(),
     graphifyArgs: config.get<string[]>("graphifyArgs", []),
-    outputFile: config.get<string>("outputFile", ".cursor/rules/project-rules.mdc").trim(),
-    agentsFile: config.get<string>("agentsFile", "AGENTS.md").trim(),
+    outputFile: config.get<string>("outputFile", DEFAULT_CURSOR_RULES_FILE).trim(),
+    agentsFile: config.get<string>("agentsFile", DEFAULT_AGENTS_FILE).trim(),
     legacyCursorRulesFile: config.get<string>("legacyCursorRulesFile", "").trim(),
     onboardingDocsDir: config.get<string>("onboardingDocsDir", "").trim(),
     memoryPackDir: config.get<string>("memoryPackDir", "").trim(),
+    featurePackDir: config.get<string>("featurePackDir", "").trim(),
     featureRequest: config.get<string>("featureRequest", "").trim(),
     bugPackDir: config.get<string>("bugPackDir", "").trim(),
     handoffPackDir: config.get<string>("handoffPackDir", "").trim(),
@@ -284,138 +299,84 @@ function loadConfig(folder: vscode.WorkspaceFolder): PromptGrapherConfig {
   };
 }
 
-function slugifyRequest(value: string): string {
-  const slug = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-
-  return slug || "bug-report";
-}
-
-function resolveBugPackDir(config: PromptGrapherConfig, options: GenerateOptions): string {
-  if (options.forceBugPack && options.bugReport && !config.bugPackDir) {
-    return `.prompt-grapher/bugs/${slugifyRequest(options.bugReport)}`;
-  }
-
-  return config.bugPackDir;
-}
-
-function resolveHandoffPackDir(config: PromptGrapherConfig, options: GenerateOptions): string {
-  if (options.forceHandoffPack && !config.handoffPackDir) {
-    return "docs/handoff";
-  }
-
-  return config.handoffPackDir;
-}
-
-function buildAnalyzeArgs(
+function buildAnalyzeOptions(
   folder: vscode.WorkspaceFolder,
   config: PromptGrapherConfig,
   options: GenerateOptions,
-): string[] {
-  const args = ["analyze", folder.uri.fsPath];
-  const bugPackDir = resolveBugPackDir(config, options);
-  const handoffPackDir = resolveHandoffPackDir(config, options);
+): PromptGrapherAnalyzeOptions {
+  const featureRequest = options.featureRequest ?? config.featureRequest;
+  const bugReport = options.bugReport;
+  const featurePackDir =
+    options.forceFeaturePack && featureRequest && !config.featurePackDir
+      ? defaultFeaturePackDirForRequest(featureRequest)
+      : config.featurePackDir;
+  const bugPackDir =
+    options.forceBugPack && bugReport && !config.bugPackDir
+      ? defaultBugPackDirForReport(bugReport)
+      : config.bugPackDir;
+  const handoffPackDir = options.forceHandoffPack
+    ? config.handoffPackDir || DEFAULT_HANDOFF_PACK_DIR
+    : config.handoffPackDir;
 
-  args.push(options.reuseGraph ? "--reuse-graph" : "--refresh-graph");
-  args.push(config.showMetrics ? "--show-metrics" : "--quiet-metrics");
-  args.push("--graphify-strategy", config.graphifyStrategy);
-
-  if (config.graphifyBackend) {
-    args.push("--graphify-backend", config.graphifyBackend);
-  }
-
-  if (config.graphifyModel) {
-    args.push("--graphify-model", config.graphifyModel);
-  }
-
-  if (config.model) {
-    args.push("--model", config.model);
-  }
-
-  if (config.baseUrl) {
-    args.push("--base-url", config.baseUrl);
-  }
-
-  if (config.outputFile) {
-    args.push("--output-file", config.outputFile);
-  }
-
-  if (config.agentsFile) {
-    args.push("--agents-file", config.agentsFile);
-  }
-
-  if (config.legacyCursorRulesFile) {
-    args.push("--legacy-cursorrules-file", config.legacyCursorRulesFile);
-  }
-
-  if (config.onboardingDocsDir) {
-    args.push("--onboarding-docs-dir", config.onboardingDocsDir);
-  }
-
-  if (config.memoryPackDir) {
-    args.push("--memory-pack-dir", config.memoryPackDir);
-  }
-
-  if (config.featureRequest) {
-    args.push("--feature-request", config.featureRequest);
-  }
-
-  if (bugPackDir) {
-    args.push("--bug-pack-dir", bugPackDir);
-  }
-
-  if (options.bugReport) {
-    args.push("--bug-report", options.bugReport);
-  }
-
-  if (handoffPackDir) {
-    args.push("--handoff-pack-dir", handoffPackDir);
-  }
-
-  for (const graphifyArg of config.graphifyArgs) {
-    if (graphifyArg.trim()) {
-      args.push("--graphify-arg", graphifyArg);
-    }
-  }
-
-  return args;
+  return {
+    path: folder.uri.fsPath,
+    bootstrapGraph: true,
+    refreshGraph: !options.reuseGraph,
+    graphifyStrategy: config.graphifyStrategy,
+    graphifyBackend: config.graphifyBackend || undefined,
+    graphifyModel: config.graphifyModel || undefined,
+    graphifyArgs: config.graphifyArgs.filter((value) => value.trim().length > 0),
+    model: config.model || undefined,
+    baseUrl: config.baseUrl || undefined,
+    outputFile: config.outputFile || undefined,
+    agentsFile: config.agentsFile || undefined,
+    legacyCursorRulesFile: config.legacyCursorRulesFile || undefined,
+    onboardingDocsDir: config.onboardingDocsDir || undefined,
+    memoryPackDir: config.memoryPackDir || undefined,
+    featurePackDir: featurePackDir || undefined,
+    featureRequest: featureRequest || undefined,
+    bugPackDir: bugPackDir || undefined,
+    bugReport: bugReport || undefined,
+    handoffPackDir: handoffPackDir || undefined,
+    quietMetrics: !config.showMetrics,
+  };
 }
 
 async function openGeneratedFiles(
   folder: vscode.WorkspaceFolder,
   config: PromptGrapherConfig,
-  options: GenerateOptions,
+  analyzeOptions: PromptGrapherAnalyzeOptions,
 ): Promise<void> {
   await openIfPresent(folder, config.outputFile);
   await openIfPresent(folder, config.agentsFile);
   await openIfPresent(folder, config.legacyCursorRulesFile);
 
-  if (config.onboardingDocsDir) {
-    await openIfPresent(folder, path.join(config.onboardingDocsDir, ONBOARDING_DOC_FILENAMES[0]));
+  if (analyzeOptions.onboardingDocsDir) {
+    await openIfPresent(folder, path.join(analyzeOptions.onboardingDocsDir, ONBOARDING_DOC_FILENAMES[0]));
   }
 
-  if (config.memoryPackDir) {
-    await openIfPresent(folder, path.join(config.memoryPackDir, MEMORY_PACK_FILENAMES[0]));
-    await openIfPresent(folder, path.join(config.memoryPackDir, MEMORY_PACK_FILENAMES[4]));
+  if (analyzeOptions.memoryPackDir) {
+    await openIfPresent(folder, path.join(analyzeOptions.memoryPackDir, MEMORY_PACK_FILENAMES[0]));
+    await openIfPresent(folder, path.join(analyzeOptions.memoryPackDir, MEMORY_PACK_FILENAMES[4]));
   }
 
-  const bugPackDir = resolveBugPackDir(config, options);
-  if (bugPackDir) {
-    await openIfPresent(folder, path.join(bugPackDir, BUG_PACK_FILENAMES[0]));
-    await openIfPresent(folder, path.join(bugPackDir, BUG_PACK_FILENAMES[4]));
+  if (analyzeOptions.featurePackDir) {
+    await openIfPresent(folder, path.join(analyzeOptions.featurePackDir, FEATURE_PACK_FILENAMES[0]));
+    await openIfPresent(folder, path.join(analyzeOptions.featurePackDir, FEATURE_PACK_FILENAMES[4]));
   }
 
-  const handoffPackDir = resolveHandoffPackDir(config, options);
-  if (handoffPackDir) {
-    await openIfPresent(folder, path.join(handoffPackDir, HANDOFF_PACK_FILENAMES[0]));
-    await openIfPresent(folder, path.join(handoffPackDir, HANDOFF_PACK_FILENAMES[6]));
+  if (analyzeOptions.bugPackDir) {
+    await openIfPresent(folder, path.join(analyzeOptions.bugPackDir, BUG_PACK_FILENAMES[0]));
+    await openIfPresent(folder, path.join(analyzeOptions.bugPackDir, BUG_PACK_FILENAMES[4]));
+  }
+
+  if (analyzeOptions.handoffPackDir) {
+    await openIfPresent(folder, path.join(analyzeOptions.handoffPackDir, HANDOFF_PACK_FILENAMES[0]));
+    await openIfPresent(folder, path.join(analyzeOptions.handoffPackDir, HANDOFF_PACK_FILENAMES[6]));
   }
 }
 
-async function openIfPresent(folder: vscode.WorkspaceFolder, relativePath: string): Promise<void> {
+async function openIfPresent(folder: vscode.WorkspaceFolder, relativePath: string | undefined): Promise<void> {
   if (!relativePath) {
     return;
   }
@@ -450,15 +411,5 @@ async function resolveWorkspaceFolder(resource?: vscode.Uri): Promise<vscode.Wor
 
   return vscode.window.showWorkspaceFolderPick({
     placeHolder: "Choose a workspace folder for PromptGrapher",
-  });
-}
-
-function quoteArgs(args: string[]): string[] {
-  return args.map((arg) => {
-    if (!/[ \t"]/.test(arg)) {
-      return arg;
-    }
-
-    return `"${arg.replace(/"/g, '\\"')}"`;
   });
 }
