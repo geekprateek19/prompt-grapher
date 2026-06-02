@@ -2,6 +2,8 @@ import * as path from "node:path";
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 
+import { missingBundledCliMessage, resolvePromptGrapherCliPath, shouldSpawnWithShell } from "./resolveCliPath";
+
 const API_KEY_SECRET = "promptGrapher.apiKey";
 const OUTPUT_CHANNEL_NAME = "PromptGrapher";
 const ONBOARDING_DOC_FILENAMES = [
@@ -48,6 +50,7 @@ type GenerateOptions = {
 
 type PromptGrapherConfig = {
   cliPath: string;
+  cliSource: "bundled" | "configured" | "path";
   model: string;
   baseUrl: string;
   graphifyStrategy: string;
@@ -133,11 +136,7 @@ async function runGenerateRules(
     return;
   }
 
-  const config = loadConfig(folder);
-  if (!config.cliPath) {
-    vscode.window.showErrorMessage("Set PromptGrapher: CLI Path before running the extension.");
-    return;
-  }
+  const config = loadConfig(context.extensionUri.fsPath, folder);
 
   const apiKey = await context.secrets.get(API_KEY_SECRET);
   const args = buildAnalyzeArgs(folder, config, options);
@@ -151,6 +150,7 @@ async function runGenerateRules(
   output.clear();
   output.show(true);
   output.appendLine(`[PromptGrapher] Workspace: ${folder.uri.fsPath}`);
+  output.appendLine(`[PromptGrapher] CLI source: ${config.cliSource}`);
   output.appendLine(`[PromptGrapher] Command: ${config.cliPath} ${quoteArgs(args).join(" ")}`);
 
   try {
@@ -165,7 +165,7 @@ async function runGenerateRules(
           const child = spawn(config.cliPath, args, {
             cwd: folder.uri.fsPath,
             env,
-            shell: process.platform === "win32",
+            shell: shouldSpawnWithShell(config.cliPath),
           });
 
           let cancellationRequested = false;
@@ -198,7 +198,9 @@ async function runGenerateRules(
             const typedError = error as NodeJS.ErrnoException;
             const message =
               typedError.code === "ENOENT"
-                ? `Unable to find '${config.cliPath}'. Install PromptGrapher first or set PromptGrapher: CLI Path.`
+                ? config.cliSource === "path"
+                  ? `${missingBundledCliMessage()} Current lookup: '${config.cliPath}'.`
+                  : `Unable to run '${config.cliPath}'. Set PromptGrapher: CLI Path if you want to override the bundled CLI.`
                 : `PromptGrapher failed to start: ${error.message}`;
             output.appendLine(`[PromptGrapher] ${message}`);
             vscode.window.showErrorMessage(message);
@@ -261,11 +263,15 @@ async function clearApiKey(context: vscode.ExtensionContext): Promise<void> {
   vscode.window.showInformationMessage("PromptGrapher API key cleared.");
 }
 
-function loadConfig(folder: vscode.WorkspaceFolder): PromptGrapherConfig {
-  const config = vscode.workspace.getConfiguration("promptGrapher", folder.uri);
+function loadConfig(extensionPath: string, folder?: vscode.WorkspaceFolder): PromptGrapherConfig {
+  const config = vscode.workspace.getConfiguration("promptGrapher", folder?.uri);
+
+  const configuredCliPath = config.get<string>("cliPath", "").trim();
+  const resolvedCli = resolvePromptGrapherCliPath(extensionPath, configuredCliPath || undefined);
 
   return {
-    cliPath: config.get<string>("cliPath", "prompt-grapher").trim(),
+    cliPath: resolvedCli.cliPath,
+    cliSource: resolvedCli.source,
     model: config.get<string>("model", "").trim(),
     baseUrl: config.get<string>("baseUrl", "").trim(),
     graphifyStrategy: config.get<string>("graphifyStrategy", "code-only").trim() || "code-only",

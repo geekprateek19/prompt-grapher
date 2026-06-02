@@ -57,3 +57,6 @@ graphify-out/
 htmlcov/
 node_modules/
 *.vsix
+vscode-extension/bin/**/*
+!vscode-extension/bin/README.md
+build/standalone-cli/

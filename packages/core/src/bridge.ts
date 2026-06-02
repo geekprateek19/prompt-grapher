@@ -6,6 +6,7 @@ import {
   DEFAULT_BUG_PACK_DIR,
   DEFAULT_FEATURE_PACK_DIR,
   DEFAULT_HANDOFF_PACK_DIR,
+  getBundledCliRelativePath,
   PromptGrapherAnalyzeOptions,
   PromptGrapherBridgeInvocation,
   PromptGrapherBridgeRuntimeOptions,
@@ -106,18 +107,49 @@ export function buildHandoffAnalyzeOptions(
   };
 }
 
+function resolveBundledCliPath(extensionPath: string | undefined): string | undefined {
+  if (!extensionPath) {
+    return undefined;
+  }
+
+  const relativePath = getBundledCliRelativePath();
+  if (!relativePath) {
+    return undefined;
+  }
+
+  const candidate = path.resolve(extensionPath, relativePath);
+  return existsSync(candidate) ? candidate : undefined;
+}
+
+function shouldUseShell(command: string, usesPythonEntry: boolean): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  if (usesPythonEntry) {
+    return true;
+  }
+
+  return !path.isAbsolute(command) && !command.toLowerCase().endsWith(".exe");
+}
+
 export function createAnalyzeBridgeInvocation(
   options: PromptGrapherAnalyzeOptions,
   runtimeOptions: PromptGrapherBridgeRuntimeOptions = {},
 ): PromptGrapherBridgeInvocation {
   const cwd = path.resolve(runtimeOptions.cwd ?? process.cwd());
+  const bundledCliPath = runtimeOptions.bundledCliPath?.trim() || resolveBundledCliPath(runtimeOptions.extensionPath);
   const explicitCommand =
     runtimeOptions.cliCommand?.trim() || process.env.PROMPT_GRAPHER_BRIDGE_COMMAND?.trim();
 
   let command = explicitCommand || "prompt-grapher";
   let commandArgs: string[] = [];
+  let usesPythonEntry = false;
 
-  if (!explicitCommand) {
+  if (bundledCliPath && !explicitCommand) {
+    command = bundledCliPath;
+    commandArgs = [];
+  } else if (!explicitCommand) {
     const pythonBin = runtimeOptions.pythonBin?.trim() || process.env.PROMPT_GRAPHER_PYTHON_BIN?.trim() || "python";
     const explicitEntry = runtimeOptions.pythonEntry?.trim() || process.env.PROMPT_GRAPHER_PYTHON_ENTRY?.trim();
     const localEntry = explicitEntry
@@ -127,6 +159,7 @@ export function createAnalyzeBridgeInvocation(
     if (localEntry) {
       command = pythonBin;
       commandArgs = [localEntry];
+      usesPythonEntry = true;
     }
   }
 
@@ -135,7 +168,7 @@ export function createAnalyzeBridgeInvocation(
     command,
     args,
     cwd,
-    shell: process.platform === "win32" && !commandArgs.length,
+    shell: shouldUseShell(command, usesPythonEntry),
     displayCommand: [command, ...args].map(quoteArg).join(" "),
   };
 }

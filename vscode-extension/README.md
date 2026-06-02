@@ -1,8 +1,8 @@
 # PromptGrapher VS Code Extension
 
-This folder is the legacy standalone scaffold. The new migration target now lives under `packages/vscode` inside the `pnpm` workspace, but this bridge remains useful until the TypeScript cutover is complete.
+This extension ships a bundled PromptGrapher CLI so users do not need to install Python or run `pip install prompt-grapher` separately.
 
-This extension is a thin VS Code bridge around the existing Python `prompt-grapher` CLI. It does not reimplement the parser or synthesizer in TypeScript. Instead, it runs your installed PromptGrapher backend against the current workspace and streams the logs into a VS Code output panel.
+It runs PromptGrapher against the current workspace and streams logs into the VS Code Output panel.
 
 ## What it does
 
@@ -10,105 +10,72 @@ This extension is a thin VS Code bridge around the existing Python `prompt-graph
 - Adds `PromptGrapher: Generate Rules (Reuse Graph)`
 - Adds `PromptGrapher: Generate Bug Fix Pack`
 - Adds `PromptGrapher: Generate Client Handoff Pack`
+- Uses the bundled CLI by default
 - Stores the API key in VS Code SecretStorage
-- Forwards model, base URL, Graphify strategy, and output file settings to the Python CLI
-- Opens the generated `.cursor/rules/project-rules.mdc` and `AGENTS.md` files after success
-- Optionally generates onboarding docs when `PromptGrapher: Onboarding Docs Dir` is configured
-- Optionally generates an assistant memory pack when `PromptGrapher: Memory Pack Dir` is configured
-- Optionally generates a bug-fix context pack when `PromptGrapher: Bug Pack Dir` is configured
-- Optionally generates a client handoff pack when `PromptGrapher: Handoff Pack Dir` is configured
+- Opens generated files after success
 
-## Requirements
+Optional packs are enabled through settings:
 
-1. Python 3.10+
-2. PromptGrapher installed in an environment available from VS Code:
+- onboarding docs via `promptGrapher.onboardingDocsDir`
+- memory pack via `promptGrapher.memoryPackDir`
+- feature request context via `promptGrapher.featureRequest`
 
-```powershell
-pip install -e .
-```
+## User setup
 
-Or install the published package instead:
-
-```powershell
-pip install prompt-grapher
-```
-
-3. If the executable is not on `PATH`, set `PromptGrapher: CLI Path` to the full binary path.
-
-Examples:
-
-- Windows venv: `D:\prompt-grapher\.venv\Scripts\prompt-grapher.exe`
-- Unix venv: `/path/to/.venv/bin/prompt-grapher`
-
-## Recommended setup
-
-1. Open VS Code settings.
-2. Set `PromptGrapher: Model` if you do not already provide `AI_MODEL_NAME` via `.env`.
+1. Install the extension from Marketplace or from a `.vsix`.
+2. Open a project folder in VS Code.
 3. Run `PromptGrapher: Set API Key`.
 4. Run `PromptGrapher: Generate Rules`.
 
-The extension forwards these values as environment overrides:
+No Python install is required for end users.
 
-- `AI_API_KEY`
-- `AI_MODEL_NAME`
-- `AI_BASE_URL`
+## Optional override
 
-Your existing local `.env` handling inside PromptGrapher still works.
-
-## Workspace settings example
+If you want to use a local development build instead of the bundled CLI, set:
 
 ```json
 {
-  "promptGrapher.cliPath": "D:\\prompt-grapher\\.venv\\Scripts\\prompt-grapher.exe",
-  "promptGrapher.model": "gpt-4.1-mini",
-  "promptGrapher.graphifyStrategy": "code-only",
-  "promptGrapher.onboardingDocsDir": "docs/onboarding",
-  "promptGrapher.memoryPackDir": ".ai-memory",
-  "promptGrapher.featureRequest": "Mujhe auth module modify karna hai",
-  "promptGrapher.handoffPackDir": "docs/handoff",
-  "promptGrapher.showMetrics": false
+  "promptGrapher.cliPath": "D:\\prompt-grapher\\.venv\\Scripts\\prompt-grapher.exe"
 }
 ```
 
-When `promptGrapher.onboardingDocsDir` is non-empty, the extension forwards `--onboarding-docs-dir` to the Python CLI and generates:
+Leave `promptGrapher.cliPath` blank in normal use.
 
-- `PROJECT_OVERVIEW.md`
-- `ARCHITECTURE.md`
-- `DATABASE_FLOW.md`
-- `API_MAP.md`
-- `IMPORTANT_FILES.md`
-- `HOW_TO_RUN.md`
-- `KNOWN_RISKS.md`
+## Publisher build flow
 
-When `promptGrapher.memoryPackDir` is non-empty, the extension forwards `--memory-pack-dir` and generates:
+Build the standalone CLI for the current platform:
 
-- `CLAUDE.md`
-- `CURSOR_RULES.md`
-- `CODING_STYLE.md`
-- `PROJECT_MEMORY.md`
-- `FEATURE_PROMPTS.md`
+```powershell
+pip install -e .
+pip install pyinstaller
+python scripts/build_standalone_cli.py
+```
 
-If `promptGrapher.featureRequest` is also set, PromptGrapher injects a request-specific context pack into `FEATURE_PROMPTS.md`, including relevant files and an exact prompt for the requested change.
+Build and package the extension:
 
-When `promptGrapher.bugPackDir` is non-empty, the extension forwards `--bug-pack-dir` and the `Generate Bug Fix Pack` command forwards `--bug-report`, producing:
+```powershell
+cd vscode-extension
+npm install
+npm run build
+npm run package
+```
 
-- `RELATED_FILES.md`
-- `API_SUSPECTS.md`
-- `DATABASE_SUSPECTS.md`
-- `FRONTEND_SUSPECTS.md`
-- `INVESTIGATION_PROMPT.md`
-- `BACKEND_FIX_PROMPT.md`
-- `REGRESSION_TEST_PROMPT.md`
+The VSIX will include:
 
-When `promptGrapher.handoffPackDir` is non-empty, or when you run `Generate Client Handoff Pack`, the extension forwards `--handoff-pack-dir` and produces:
+```text
+vscode-extension/bin/<platform>/prompt-grapher(.exe)
+```
 
-- `TECHNICAL_DOCS.md`
-- `SETUP_GUIDE.md`
-- `DEPLOYMENT_GUIDE.md`
-- `API_DOCUMENTATION.md`
-- `DATABASE_DOCUMENTATION.md`
-- `FUTURE_IMPROVEMENTS.md`
-- `AI_MAINTENANCE_PROMPTS.md`
+For Marketplace releases, build the standalone CLI on:
+
+- Windows x64
+- Windows arm64
+- macOS arm64
+- macOS x64
+- Linux x64
+- Linux arm64
+
+Then assemble one VSIX per platform, or use a CI matrix that uploads platform-specific VSIX builds.
 
 ## Development
 
@@ -118,19 +85,15 @@ npm install
 npm run build
 ```
 
-Open the `vscode-extension` folder in VS Code and press `F5` to launch an Extension Development Host.
+For local F5 debugging without a bundled binary, either:
 
-## Packaging
+- run `python scripts/build_standalone_cli.py` once, or
+- set `promptGrapher.cliPath` to your local venv executable
 
-From `vscode-extension/`:
+Press `F5` from the repo root to launch the Extension Development Host.
 
-```powershell
-npm install -g @vscode/vsce
-vsce package
-```
+## Limits
 
-## Limits of this scaffold
-
-- The extension expects an installed `prompt-grapher` CLI.
-- It does not bundle Python or Graphify into the VSIX.
-- If you want a single-click install experience later, the next step is bundling a Python runtime or shipping a remote service backend.
+- The bundled CLI makes the VSIX larger than a pure TypeScript extension.
+- Marketplace packaging still needs one standalone build per target OS/architecture.
+- A future TypeScript-native backend can remove the bundled Python runtime entirely.

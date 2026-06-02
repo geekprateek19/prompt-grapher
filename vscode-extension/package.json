@@ -1,7 +1,7 @@
 {
   "name": "prompt-grapher-vscode",
   "displayName": "PromptGrapher",
-  "description": "Generate repository-specific Cursor rules, AGENTS.md, onboarding docs, and AI memory packs from the current VS Code workspace.",
+  "description": "Generate repository-specific AI handoff docs, Cursor rules, feature prompts, and client packs from the current VS Code workspace. No separate Python install required.",
   "version": "0.0.1",
   "publisher": "geekprateek",
   "license": "MIT",
@@ -76,8 +76,8 @@
       "properties": {
         "promptGrapher.cliPath": {
           "type": "string",
-          "default": "prompt-grapher",
-          "description": "Executable used by the extension. Point this to the prompt-grapher binary if it is not already available on PATH."
+          "default": "",
+          "description": "Optional override for the PromptGrapher executable. Leave blank to use the bundled CLI shipped with the extension."
         },
         "promptGrapher.model": {
           "type": "string",
@@ -166,7 +166,10 @@
   },
   "scripts": {
     "build": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "bundle-cli": "python ../scripts/build_standalone_cli.py",
+    "prepackage": "npm run build",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.17.57",

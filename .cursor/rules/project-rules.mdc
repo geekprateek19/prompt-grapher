@@ -1,0 +1,73 @@
+---
+description: PromptGrapher generated project-wide rules
+globs:
+alwaysApply: true
+---
+
+[ROLE]
+This .cursorrules file is designed to guide code changes in a repository with a custom or mixed modular architecture, using Python and TypeScript as primary languages.
+
+[ARCHITECTURE RULES]
+- The repository's architecture is custom or mixed modular, with implicit boundaries.
+- Respect the existing directory structure, including top directories such as packages, vscode-extension, core, and tests.
+- Preserve the existing entrypoints, including package.json, packages/cli/package.json, packages/core/package.json, packages/shared/package.json, packages/vscode/package.json, setup.py, and vscode-extension/package.json.
+- Do not introduce broad refactors, folder moves, file renames, architecture migrations, dependency swaps, or global formatting changes unless explicitly requested.
+
+[CODE STYLE]
+- Follow the naming convention already used in the touched directory.
+- Do not rename files unless required for the requested change.
+- Since the naming patterns for classes, functions, and files are unknown or mixed, mirror the existing naming patterns in the touched directory.
+
+[TESTING AND VALIDATION]
+- Use the existing test setup already configured in the repository.
+- Mirror the detected test file placement and filename style when adding or updating tests.
+- Test files are typically placed in the tests directory.
+
+[BUG FIX PROTOCOL]
+- First reproduce or reason through the reported bug using the smallest relevant code path.
+- Identify the root cause before making changes.
+- When fixing a bug, change the minimum number of lines required.
+- Apply the smallest safe fix in the affected service, component, or utility.
+- Change only the condition that is wrong. Leave correct conditions untouched.
+- Do not rewrite unrelated logic while fixing the bug.
+- If business rules are unclear, ask before editing instead of assuming.
+- Add or update a regression test that fails before the fix and passes after the fix, when practical.
+- Preserve public contracts and user-visible behavior according to [PUBLIC CONTRACT SAFETY] unless the bug itself is caused by an incorrect contract.
+- If the user clarifies business rules mid-task, revert wrong assumptions and apply only the final agreed rules. Do not layer fixes on top of earlier wrong fixes.
+- Validate nearby edge cases related to the bug.
+- In the final response, explain the root cause, files changed, fix summary, and tests run.
+
+[DIFF HYGIENE]
+- The diff must contain only intentional changes.
+- Never leave commented-out old code in the file.
+- Preserve existing indentation, line breaks, and naming in untouched code.
+
+[FILE PLACEMENT]
+- New files belong in the existing source roots, such as packages, vscode-extension, core, or .vscode.
+- Prefer placing code beside the feature or layer being changed instead of creating a new top-level folder when an existing location already fits.
+- If the payload is weak, instruct the agent to mirror the nearest neighboring file layout.
+
+[DEPENDENCY HYGIENE]
+- Respect observed dependency flows and layer boundaries from the payload.
+- Keep imports and call direction aligned with neighboring modules instead of reaching across unrelated layers.
+- Do not bypass an existing service, repository, adapter, hook, store, or shared utility boundary without proof from surrounding code.
+
+[PROVE BEFORE EXPANDING]
+- Before adding defensive code such as null checks, try-catch blocks, caching, eager-loading expansions, or similar safeguards, explain why the existing code fails without it.
+- If that failure is not proven, do not add the defensive code.
+
+[PERFORMANCE HYGIENE]
+- Performance work should happen only when touching performance-sensitive paths or when a measurable bottleneck is identified.
+- Do not add caching, memoization, batching, or lazy loading preemptively.
+
+[PUBLIC CONTRACT SAFETY]
+- Do not change public APIs, exported names, route paths, request and response shapes, schema contracts, persistence formats, or user-visible UI behavior unless explicitly requested.
+
+[DATA SAFETY]
+- Do not expose secrets, tokens, credentials, PII, or sensitive data in logs, errors, analytics, test snapshots, fixtures, or UI output.
+- Validate and sanitize external input.
+- Do not weaken authentication, authorization, encryption, auditability, or permission checks.
+
+[COMMUNICATION STYLE]
+- The final response should summarize changed files if edits were made; otherwise summarize proposed files and changes.
+- Also summarize behavior impact, architecture impact, and tests or validation run.

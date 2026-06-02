@@ -87,8 +87,8 @@
       "properties": {
         "promptGrapher.bridgeCommand": {
           "type": "string",
-          "default": "prompt-grapher",
-          "description": "Temporary bridge command used to run the legacy Python PromptGrapher CLI during the TypeScript migration."
+          "default": "",
+          "description": "Optional override for the PromptGrapher executable. Leave blank to use the bundled CLI shipped with the extension."
         },
         "promptGrapher.pythonBin": {
           "type": "string",

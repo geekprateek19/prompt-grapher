@@ -1,3 +1,9 @@
+export {
+  getBundledCliExecutableName,
+  getBundledCliPlatformKey,
+  getBundledCliRelativePath,
+} from "./bundledCli";
+export type { BundledCliPlatform } from "./bundledCli";
 export const DEFAULT_CURSOR_RULES_FILE = ".cursor/rules/project-rules.mdc";
 export const DEFAULT_AGENTS_FILE = "AGENTS.md";
 export const DEFAULT_ONBOARDING_DOCS_DIR = "docs/onboarding";
@@ -108,6 +114,8 @@ export interface PromptGrapherAnalyzeOptions {
 export interface PromptGrapherBridgeRuntimeOptions {
   cwd?: string;
   cliCommand?: string;
+  extensionPath?: string;
+  bundledCliPath?: string;
   pythonBin?: string;
   pythonEntry?: string;
 }

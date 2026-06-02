@@ -148,7 +148,8 @@ async function runGenerateRules(
   const analyzeOptions = buildAnalyzeOptions(folder, config, options);
   const invocation = createAnalyzeBridgeInvocation(analyzeOptions, {
     cwd: folder.uri.fsPath,
-    cliCommand: config.bridgeCommand,
+    extensionPath: context.extensionUri.fsPath,
+    cliCommand: config.bridgeCommand || undefined,
     pythonBin: config.pythonBin || undefined,
     pythonEntry: config.pythonEntry || undefined,
   });
